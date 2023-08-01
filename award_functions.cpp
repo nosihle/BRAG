@@ -13,38 +13,14 @@ const int LSM_SCK = 27;
 const int LSM_MISO = 39;
 const int LSM_MOSI = 26;
 
-/*
-  void calibrateIMUs(IMUData& data, Adafruit_LSM6DS33 lsm6ds33, sensors_event_t& acc, sensors_event_t& gyro, sensors_event_t& temp) { // Needs that ai0,gi0 be already defined
-  //TODO - change so that it outputs ai0,gi0
-  int num_readings = 1000;
-
-  // Read and average the raw values from the IMU
-  for (int i = 0; i < num_readings; i++) {
-    lsm6ds33.getEvent(&acc, &gyro, &temp);
-    data.aX0 += acc.acceleration.x;
-    data.aY0 += acc.acceleration.y;
-    data.aZ0 += acc.acceleration.z;
-    data.gX0 += gyro.gyro.x;
-    data.gY0 += gyro.gyro.y;
-    data.gZ0 += gyro.gyro.z;
-    //delay(10);
-  }
-  data.aX0 /= num_readings;
-  data.aY0 /= num_readings;
-  data.aZ0 /= num_readings;
-  data.gX0 /= num_readings;
-  data.gY0 /= num_readings;
-  data.gZ0 /= num_readings;
-  }
-*/
-
-void calibrateIMUs(Adafruit_LSM6DS33 lsm6ds33, int channel, sensors_event_t& acc, sensors_event_t& gyr, sensors_event_t& tmp, AnglesComps& OutBias) {
-  int num_readings = 100;
+void calibrateIMUs(Adafruit_LSM6DS33 lsm6ds33, int channel, sensors_event_t& acc,
+                   sensors_event_t& gyr, sensors_event_t& tmp, AnglesComps_t& OutBias) {
+  int num_readings = 500;
   float aX, aY, aZ, gX, gY, gZ;
 
   // Read and average the raw values from the IMU
   for (int i = 0; i < num_readings; i++) {
-    readIMUData(lsm6ds33, channel, acc, gyr, tmp);
+    readIMUData(lsm6ds33, channel, acc, gyr, tmp, OutBias);
 
     aX += acc.acceleration.x;
     aY += acc.acceleration.y;
@@ -53,7 +29,6 @@ void calibrateIMUs(Adafruit_LSM6DS33 lsm6ds33, int channel, sensors_event_t& acc
     gY += gyr.gyro.y;
     gZ += gyr.gyro.z;
 
-    //delay(10);
   }
 
   OutBias.aX = aX / num_readings;
@@ -63,10 +38,11 @@ void calibrateIMUs(Adafruit_LSM6DS33 lsm6ds33, int channel, sensors_event_t& acc
   OutBias.gY = gY / num_readings;
   OutBias.gZ = gZ / num_readings;
   OutBias.d_time = 0;
-
 }
 
-void readIMUData(Adafruit_LSM6DS33 lsm6ds33, int channel, sensors_event_t& acc, sensors_event_t& gyro, sensors_event_t& temp) {
+void readIMUData(Adafruit_LSM6DS33 lsm6ds33, int channel,
+                 sensors_event_t& acc, sensors_event_t& gyro, sensors_event_t& temp,
+                 AnglesComps_t& InBias) {
   /*
      Function allows for the reading of the data (acc, gyro, temp) from an IMU object
   */
@@ -94,6 +70,16 @@ void readIMUData(Adafruit_LSM6DS33 lsm6ds33, int channel, sensors_event_t& acc, 
   }
 
   lsm6ds33.getEvent(&acc, &gyro, &temp); // Get data
+
+  //include the bias values to the readings
+
+  acc.acceleration.x = acc.acceleration.x + InBias.aX;
+  acc.acceleration.y = acc.acceleration.y + InBias.aY;
+  acc.acceleration.z = acc.acceleration.z + InBias.aZ;
+
+  gyro.gyro.x = gyro.gyro.x + InBias.gX;
+  gyro.gyro.y = gyro.gyro.y + InBias.gY;
+  gyro.gyro.z = gyro.gyro.z + InBias.gZ;
 }
 
 void switchMux(int channel) {
@@ -193,6 +179,15 @@ float dispToRots(float displ, float radius, float Lt) {
   return numRots;
 }
 
+float rotSpeed (float linSpeed, float Lt, float n, float radius) {
+  /*
+     This function computes the rotational speed in rad/s, given that Lt,
+     radius are in the same units (cm / m) and linSpeed is also in corresponding units
+     cm/s or m/s
+  */
+  float theta = 2 * PI * n; //radians
+  return linSpeed * sqrt(pow(Lt, 2) + pow(theta * radius, 2)) / (theta * pow(radius, 2));
+}
 
 int sgn(float num) {
   /*
@@ -202,14 +197,116 @@ int sgn(float num) {
 }
 
 float Voltage2Force(int forceBits) {
-  float p1, p2, p3, p4, p5, p6, p7, p8, p9;
-  p1 = 0.1395; p2 = -1.878; p3 = 10.52; p4 = -31.58;
-  p5 = 54.86; p6 = -55.14; p7 = 29.8; p8 = -5.521;
-  p9 = 1.216;
+  /*
+     function converts the bits from ADS1115 to force in Newtons.
+     calibration was performed with coefficients identified using fmincon
+  */
 
-  float out = p1 * pow(forceBits, 8) + p2 * pow(forceBits, 7) + p3 * pow(forceBits, 6) +
-              p4 * pow(forceBits, 5) + p5 * pow(forceBits, 4) + p6 * pow(forceBits, 3) +
-              p7 * pow(forceBits, 2) + p8 * forceBits + p9;
+  if (forceBits < 10) { //bits should never be below zero. negative means no reading
+    float out = 0;
+    return out;
+  } else {
+    float p1, p2, p3, p4, p5, p6, p7, p8, p9;
+    p1 = 0.1395; p2 = -1.878; p3 = 10.52; p4 = -31.58;
+    p5 = 54.86; p6 = -55.14; p7 = 29.8; p8 = -5.521;
+    p9 = 1.216;
 
-  return out;
+    //Convert bits to voltage, V
+    float SCALE = 0.18725 / 1000; // V per bit.
+    float forceVolts = forceBits * SCALE;
+
+    float out = p1 * pow(forceVolts, 8) + p2 * pow(forceVolts, 7) + p3 * pow(forceVolts, 6) +
+                p4 * pow(forceVolts, 5) + p5 * pow(forceVolts, 4) + p6 * pow(forceVolts, 3) +
+                p7 * pow(forceVolts, 2) + p8 * forceVolts + p9;
+
+    return out; //force in Newtons
+  }
+}
+
+void SineTraj(state_t& des_state, unsigned currTime) {
+  /*
+     generates signals for sinusiadal position, velocity and acceleration
+  */
+  des_state.pos.x = sin(currTime);
+  des_state.pos.y = -1 * cos(currTime);
+  des_state.pos.z = sin(currTime);
+
+  des_state.vel.x = cos(currTime);
+  des_state.vel.y = sin(currTime);
+  des_state.vel.z = cos(currTime);
+
+  des_state.acc.x = -1 * sin(currTime);
+  des_state.acc.y = cos(currTime);
+  des_state.acc.z = -1 * sin(currTime);
+}
+
+void CubicTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float PosInit,
+                     float PosFinal, float VelInit, float VelFinal) {
+  /*
+     computes the coefficients to fit a cubic function for a given
+     set of initial and final conditions for velocity and acceleration
+  */
+  unsigned T = t_final - t_init;
+  Coeff.a0 = PosInit;
+  Coeff.a1 = VelInit;
+  Coeff.a2 = -1 * (3 * PosInit - 3 * PosFinal - VelInit + VelFinal + 3 * T * VelInit) / (T * (3 * T - 2));
+  Coeff.a3 = (2 * PosInit - 2 * PosFinal + T * VelInit + T * VelFinal) / (pow(T, 3) * (3 * T - 2));
+  Coeff.a4 = 0;
+  Coeff.a5 = 0;
+}
+
+void QuinticTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float PosInit,
+                       float PosFinal, float VelInit, float VelFinal, float AccInit, float AccFinal) {
+  /*
+     Generates the constants to fit in a quintic polynomial when the initial
+     positon, velocity and acceleration together with final position, velocity and accelerations
+     are specified.
+  */
+  unsigned T = t_final - t_init;
+  Coeff.a0 = PosInit;
+  Coeff.a1 = VelInit;
+  Coeff.a2 = AccInit / 2;
+  Coeff.a3 = -1 * (20 * PosInit - 20 * PosFinal + 12 * T * VelInit + 8 * T * VelFinal + 3 * AccInit *
+                   pow(T, 2) - AccFinal * pow(T, 2)) / (2 * pow(T, 3));
+  Coeff.a4 = (30 * PosInit - 30 * PosFinal + 16 * T * VelInit + 14 * T * VelFinal + 3 * AccInit *
+              pow(T, 2) - 2 * AccFinal * pow(T, 2)) / (2 * pow(T, 4));
+  Coeff.a5 = -1 * (12 * PosInit - 12 * PosFinal + 6 * T * VelInit + 6 * T * VelFinal + AccInit *
+                   pow(T, 2) - AccFinal * pow(T, 2)) / (2 * pow(T, 5));
+}
+
+void CubicTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
+  /*
+     given the constants for a cubic function and time, compute the target position,
+     and velocity
+  */
+  des_state.pos.x = Coeff.a0 + Coeff.a1 * t + Coeff.a2 * pow(t, 2) + Coeff.a3 * pow(t, 3);
+  des_state.pos.y = 0.0;
+  des_state.pos.z = 0.0;
+
+  des_state.vel.x = Coeff.a1 + 2 * Coeff.a2 * t + 3 * Coeff.a3 * pow(t, 2);
+  des_state.vel.y = 0.0;
+  des_state.vel.z = 0.0;
+
+  des_state.acc.x = 0.0;
+  des_state.acc.y = 0.0;
+  des_state.acc.z = 0.0;
+
+}
+
+void QuinticTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
+  /*
+     compute the position, velocity, and acceleration given the constants for quintic polynomial and the current time
+  */
+  des_state.pos.x = Coeff.a0 + Coeff.a1 * t + Coeff.a2 * pow(t, 2) + Coeff.a3 * pow(t, 3) + Coeff.a4 * pow(t, 4) + Coeff.a5 * pow(t, 5);
+  des_state.pos.y = 0.0;
+  des_state.pos.z = 0.0;
+
+  des_state.vel.x = Coeff.a1 + 2 * Coeff.a2 * t + 3 * Coeff.a3 * pow(t, 2) + 4 * Coeff.a4 * pow(t, 3) + 5 * Coeff.a5 * pow(t, 5);
+  des_state.vel.y = 0.0;
+  des_state.vel.z = 0.0;
+
+  des_state.acc.x = 2 * Coeff.a2 + 6 * Coeff.a3 * t + 12 * Coeff.a4 * pow(t, 2) + 20 * Coeff.a5 * pow(t, 3);
+  des_state.acc.y = 0.0;
+  des_state.acc.z = 0.0;
+
 }

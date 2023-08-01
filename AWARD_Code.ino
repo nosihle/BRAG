@@ -25,34 +25,17 @@ double velPD[nM] = {}; //compensated command velocity
 const int motor[2] = {};
 int Revs_Count[] = {0, 0, 0, 0, 0, 0}; double Revs[] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
-struct EncderCounts {
-  volatile long m1 = 0;
-  volatile long m2 = 0;
-  volatile long m3 = 0;
-  volatile long m4 = 0;
-  volatile long m5 = 0;
-  volatile long m6 = 0;
-};
-
-struct encRevs {
-  float m1 = 0;
-  float m2 = 0;
-  float m3 = 0;
-  float m4 = 0;
-  float m5 = 0;
-  float m6 = 0;
-};
-
 //need to double check these for servocity motors, units in kg.mm/A
-float Kt_10 = 1/0.82;
-float Kt_15 = 1/0.56;
-float Kt_30 = 1/0.31;
-float Kt_50 = 1/0.19;
+float Kt_10 = 1 / 0.82;
+float Kt_15 = 1 / 0.56;
+float Kt_30 = 1 / 0.31;
+float Kt_50 = 1 / 0.19;
 
-EncderCounts ticks;
-encRevs rots;
-float goalRots = 100;
-long int goalTicks = goalRots * 10; // GR = 15;
+EncderCounts_t ticks;
+encRevs_t rots;
+float goalRots = 20; //92, 90
+int gr = 30.0f; int cpr = 12.0;
+long int goalTicks = goalRots * gr * cpr; // GR = 15;
 
 //---------------------------------------------------------------------
 //Define motor direction control pins
@@ -84,22 +67,20 @@ Encoder BCK1(MJ5_EN_A, MJ5_EN_B); Encoder BCK2(MJ6_EN_A, MJ6_EN_B);
 int COUNTER = 0;
 
 //Initialize sensor reading, Current, SCPs, FSRs
-FsrScpData sensorData;
-
+FsrScpData_t sensorData;
+state_t fingState;
 
 //initialize for kinematics and dynamics
 double M[9], C[9], B[9], G[3], finger[9];
 double state_pos[3] = {.1, 1, 2};
 double fin_length[3] = {3, 4, 5};
 
-struct fingAngles {
-  float a1, a2, a3;
-};
+state_t desired_state;
 
 //IMU needs
 Adafruit_LSM6DS33 lsm6ds33;
 #define SAMPLE_RATE 100.0 // in Hz
-unsigned long microsPerReading, microsPrevious;
+unsigned long millisPerReading, millisPrevious;
 
 //Define MUX control pins and SIG_pin
 const int s0 = 30, s1 = 31, s2 = 32, s3 = 34;
@@ -116,28 +97,24 @@ const int LSM_SCK = 27;
 const int LSM_MISO = 39;
 const int LSM_MOSI = 26;
 
-Madgwick filter0, filter1, filter2, filter3, filter4, filter5, filter6, filter7, filter8;
-
 float roll, roll1, roll_last, pitch, pitch_last, yaw, yaw_last, yaw_diff;
 sensors_event_t accel1, accel2, accel3, accel4, accel5, accel6, accel7, accel8, accel1_last;
 sensors_event_t gyro1, gyro2, gyro3, gyro4, gyro5, gyro6, gyro7, gyro8, gyro1_last;
 sensors_event_t temp1, temp2, temp3, temp4, temp5, temp6, temp7, temp8, temp1_last;
 
-fingAngles fin_angles;
-AnglesComps anglesOld1, anglesOld2, anglesOld3, anglesOld6;
-AnglesComps BiasIMU1, BiasIMU2, BiasIMU3, BiasIMU6;
-EulerAngIMU IMUAngs1, IMUAngs2, IMUAngs3, IMUAngs6;
-
+fingAngles_t fin_angles;
+AnglesComps_t anglesNew1, anglesNew2, anglesNew3, anglesNew6;
+AnglesComps_t BiasIMU1, BiasIMU2, BiasIMU3, BiasIMU6;
+EulerAngIMU_t IMUAngs1, IMUAngs2, IMUAngs3, IMUAngs6;
 
 float start_time_2; float start_time;
 
 // initialize variables to pace updates to correct rate
 float dt = (1 / SAMPLE_RATE);
-
-/*
-  struct IMUData {
-  float aX0, aY0, aZ0, gX0, gY0, gZ0;
-  }*/
+  
+unsigned long t_now;
+unsigned long t_dur;
+unsigned long t_tic, t_toc, d_t_C; //timing calibrations
 
 void setup(void) {
   pinMode(pinNum, INPUT_PULLUP); //push button
@@ -168,33 +145,103 @@ void setup(void) {
 
   Serial.begin(115200);
 
-  /*
-    filter0.begin(5);
-    filter1.begin(5);
-    filter2.begin(5);
-    filter3.begin(5);
-    filter4.begin(5);
-    filter5.begin(5);
-    filter6.begin(5);
-    filter7.begin(5);
-    filter8.begin(5);
-  */
-
-  microsPerReading = 1000000 * dt; //delta_t in microseconds.
-  microsPrevious = micros();
+  millisPerReading = 1000 * dt; //delta_t in milliseconds.
+  millisPrevious = millis();
 
   //calibrate IMUs
-  Serial.println("Calibrating IMUs...");
+  //Serial.println("Calibrating IMUs...");
+  /*
+     Run calibration routine once. Values will be stored in the EEPROM or hardcorded for
+     fast experiments. EEPROM allows for data to be stored even after the device
+     resets
+  */
 
-  calibrateIMUs(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
-  calibrateIMUs(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
-  calibrateIMUs(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
-  calibrateIMUs(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+  /*
+    t_tic = micros();
+    calibrateIMUs(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+    calibrateIMUs(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+    calibrateIMUs(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+    calibrateIMUs(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+    t_toc = micros();
+    d_t_C = (t_toc - t_tic);
+  */
 
   /*
     calibrateIMUs(lsm6ds33, 5, accel1, gyro1, temp1, BiasIMU1);
     calibrateIMUs(lsm6ds33, 8, accel2, gyro2, temp2, BiasIMU2);
   */
+
+  //cast the values to the serial monitor and also save/write to the EEPROM
+
+  /****
+     THULANI = Need to double check and make sure it works.
+
+    Need to divide by 4 because analog inputs range from
+    0 to 1023 and each byte of the EEPROM can only hold a
+    value from 0 to 255.
+
+    int val = analogRead(0) / 4;
+
+    Write the value to the appropriate byte of the EEPROM.
+    these values will remain there when the board is
+    turned off.
+
+    EEPROM.write(addr, val);
+
+    Advance to the next address, when at the end restart at the beginning.
+    Rather than hard-coding the length, you should use the pre-provided length function.
+    This will make your code portable to all AVR processors.
+
+    addr = addr + 1;
+    if(addr == EEPROM.length())
+    addr = 0;
+  ****/
+  /*
+    Serial.print(BiasIMU1.aX); Serial.print(",");
+    Serial.print(BiasIMU1.aY); Serial.print(",");
+    Serial.print(BiasIMU1.aZ); Serial.print(",");
+    Serial.print(BiasIMU1.gX); Serial.print(",");
+    Serial.print(BiasIMU1.gY); Serial.print(",");
+    Serial.print(BiasIMU1.gZ); Serial.print(",");
+    Serial.println();
+    Serial.print(BiasIMU2.aX); Serial.print(",");
+    Serial.print(BiasIMU2.aY); Serial.print(",");
+    Serial.print(BiasIMU2.aZ); Serial.print(",");
+    Serial.print(BiasIMU2.gX); Serial.print(",");
+    Serial.print(BiasIMU2.gY); Serial.print(",");
+    Serial.print(BiasIMU2.gZ); Serial.print(",");
+    Serial.println();
+    Serial.print(BiasIMU3.aX); Serial.print(",");
+    Serial.print(BiasIMU3.aY); Serial.print(",");
+    Serial.print(BiasIMU3.aZ); Serial.print(",");
+    Serial.print(BiasIMU3.gX); Serial.print(",");
+    Serial.print(BiasIMU3.gY); Serial.print(",");
+    Serial.print(BiasIMU3.gZ); Serial.print(",");
+    Serial.println();
+    Serial.print(BiasIMU6.aX); Serial.print(",");
+    Serial.print(BiasIMU6.aY); Serial.print(",");
+    Serial.print(BiasIMU6.aZ); Serial.print(",");
+    Serial.print(BiasIMU6.gX); Serial.print(",");
+    Serial.print(BiasIMU6.gY); Serial.print(",");
+    Serial.print(BiasIMU6.gZ); Serial.print(",");
+    Serial.println();
+    Serial.print(d_t_C, 3); Serial.print(",");
+    Serial.println();
+  */
+
+  //Update the biam angles using the calibration from above.EEPROM or hard code
+  BiasIMU1.aX = -2.39;  BiasIMU1.aY = -4.73;  BiasIMU1.aZ = -7.04;
+  BiasIMU1.gX = 0.37; BiasIMU1.gY = -0.30;  BiasIMU1.gZ = -0.22;
+
+  BiasIMU2.aX = -0.75;  BiasIMU2.aY = -3.02;  BiasIMU2.aZ = -7.87;
+  BiasIMU2.gX = 0.28; BiasIMU2.gY = -0.30;  BiasIMU2.gZ = -0.33;
+
+  BiasIMU3.aX = 2.19; BiasIMU3.aY = -2.25;  BiasIMU3.aZ = -8.04;
+  BiasIMU3.gX = 1.38; BiasIMU3.gY = -1.06;  BiasIMU3.gZ = -0.58;
+
+  BiasIMU6.aX = -1.28;  BiasIMU6.aY = -3.67;  BiasIMU6.aZ = -7.85;
+  BiasIMU6.gX = 0.31; BiasIMU6.gY = -0.30;  BiasIMU6.gZ = -0.27;
+
 
   //initialize SD card
   if (!SD.begin(chipSelect)) {
@@ -208,13 +255,23 @@ void setup(void) {
   Serial.println("Setup done...");
   delayMicroseconds(25);
   Serial.println("Starting to run main code...");
+
+  //finger position
+  int posFingr = 1;
+
+  t_dur = millis(); t_now = millis();
+
+  // control
+  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
+  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
+
 }
 
 void loop(void) {
-  butControl(pinNum);
-  //butControlRVS(pinNum);
-  unsigned long t_now = micros();
-  if (t_now - microsPrevious >= microsPerReading) {
+  //butControl(pinNum); //CW for top motor
+  //butControlRVS(pinNum); //CCW for top motor
+  t_now = millis();
+  if (t_now - millisPrevious >= millisPerReading) {
 
     /* calibration debugging code
 
@@ -246,8 +303,8 @@ void loop(void) {
         Serial.print(gyro2.gyro.y); Serial.print(",");
         Serial.print(gyro2.gyro.z); Serial.print(",");
 
-        Serial.print(anglesOld1.aX, 3); Serial.print(",");
-        Serial.print(anglesOld2.aX, 3); Serial.print(",");
+        Serial.print(anglesNew1.aX, 3); Serial.print(",");
+        Serial.print(anglesNew2.aX, 3); Serial.print(",");
         Serial.print(t_now * 1e-6, 3); //48
         Serial.println();
 
@@ -257,10 +314,10 @@ void loop(void) {
     */
     //Serial.println("Reading IMUs...");
     //Continously read data
-    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1);
-    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2);
-    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3);
-    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6);
+    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
 
     //Serial.println("Updating ticks and SCP,Current data...");
     getEncCounts(ticks, rots);
@@ -274,15 +331,19 @@ void loop(void) {
       state_pos[2] = fin_angles.a3;
     */
 
-    computeFingerAngleCF(accel1, gyro1, anglesOld1, BiasIMU1);
-    computeFingerAngleCF(accel2, gyro2, anglesOld2, BiasIMU2);
-    computeFingerAngleCF(accel3, gyro3, anglesOld3, BiasIMU3);
-    computeFingerAngleCF(accel6, gyro6, anglesOld6, BiasIMU6);
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, BiasIMU6);
 
-    // control
-    //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_now);
+    /*
+        // control
+        Serial.print("Target of 30"); Serial.println();
+        trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_now);
+        Serial.print("Target of 0"); Serial.println();
+        trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_now); */
 
-    //tsaPosControl(4, 0.015, 18, m_FNT3, m_FNT4, t_now); //units have to match
+    //tsaPosControl(2.1068, 0.015, 16.5, m_FNT3, m_FNT4, t_now); //units have to match
 
     /*
         //cast data to the serial monitors or record to SD card
@@ -324,10 +385,10 @@ void loop(void) {
           dataFile.print(gyro6.gyro.y); dataFile.print(",");
           dataFile.print(gyro6.gyro.z); dataFile.print(",");
 
-          dataFile.print(anglesOld1.aX, 3); dataFile.print(",");
-          dataFile.print(anglesOld2.aX, 3); dataFile.print(",");
-          dataFile.print(anglesOld3.aX, 3); dataFile.print(",");
-          dataFile.print(anglesOld6.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew1.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew2.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew3.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew6.aX, 3); dataFile.print(",");
 
           dataFile.print(ticks.m3); dataFile.print(",");
           dataFile.print(rots.m3); dataFile.print(",");
@@ -379,23 +440,25 @@ void loop(void) {
           Serial.print(gyro6.gyro.y); Serial.print(",");
           Serial.print(gyro6.gyro.z); Serial.print(",");
 
-          Serial.print(anglesOld1.aX, 3); Serial.print(",");
-          Serial.print(anglesOld2.aX, 3); Serial.print(",");
-          Serial.print(anglesOld3.aX, 3); Serial.print(",");
-          Serial.print(anglesOld6.aX, 3); Serial.print(","); */
+          Serial.print(anglesNew1.aX, 3); Serial.print(",");
+          Serial.print(anglesNew2.aX, 3); Serial.print(",");
+          Serial.print(anglesNew3.aX, 3); Serial.print(",");
+          Serial.print(anglesNew6.aX, 3); Serial.print(","); */
 
-    Serial.print(ticks.m3); Serial.print(",");
-    Serial.print(rots.m3); Serial.print(",");
-    Serial.print(ticks.m4); Serial.print(",");
-    Serial.print(rots.m4); Serial.print(",");
-
-    
-    Serial.print(sensorData.amps3); Serial.print(",");
-    Serial.print(sensorData.amps4); Serial.print(",");
-    
-    Serial.println();
+    //for debugging only
     /*
+        Serial.print(ticks.m3); Serial.print(",");
+        Serial.print(rots.m3); Serial.print(",");
+        Serial.print(ticks.m4); Serial.print(",");
+        Serial.print(rots.m4); Serial.print(",");
 
+        Serial.print(sensorData.amps3); Serial.print(",");
+        Serial.print(sensorData.amps4); Serial.print(",");
+
+        Serial.println();
+    */
+
+    /*
       Serial.print(sensorData.amps3); Serial.print(",");
       Serial.print(sensorData.amps4); Serial.print(",");
       Serial.print(sensorData.scp1); Serial.print(",");
@@ -406,13 +469,12 @@ void loop(void) {
   }
 
   // increment previous time, so we keep proper pace
-  microsPrevious = microsPrevious + microsPerReading;
+  millisPrevious = millisPrevious + millisPerReading;
 
   /*
     dynamics(state_pos, fin_length, M, C, B, G);
     finger_pos(state_pos, fin_length, finger);
   */
-
 }
 
 //Supporting functions
@@ -521,14 +583,14 @@ void dataPrintOld(int Transient_Seconds) {
 }
 
 
-void getEncCounts(EncderCounts& mTicks, encRevs& mRots) {
+void getEncCounts(EncderCounts_t& mTicks, encRevs_t& mRots) {
   /*
      Assumes that motors are of the same gear ratio. If different,
      this needs to be updated.
 
   */
 
-  const float gr = 10.0; // confirm with motors being used
+  const float gr = 30.0; // confirm with motors being used
   const int CPR = 12;  //counts per revolution
 
   mTicks.m1 = FNT1.read();
@@ -546,7 +608,7 @@ void getEncCounts(EncderCounts& mTicks, encRevs& mRots) {
 
 }
 
-void getSensorData(FsrScpData& data) { // Read the data from the ADS 1115.
+void getSensorData(FsrScpData_t& data) { // Read the data from the ADS 1115.
 
   float Viout = 0.245 * 1000; // mV Zero current Output Voltage
   float SCALE = 0.18725; // mV per bit. depends on gain of ADS
@@ -561,7 +623,7 @@ void getSensorData(FsrScpData& data) { // Read the data from the ADS 1115.
   ads2.setGain(GAIN_TWOTHIRDS);
   long amps5 = ads2.readADC_SingleEnded(0);
   long amps6 = ads2.readADC_SingleEnded(1);
-  data.scp1 = ads2.readADC_SingleEnded(2);
+  long scp1 = ads2.readADC_SingleEnded(2);
   data.scp2 = ads2.readADC_SingleEnded(3);
 
   ads3.setGain(GAIN_TWOTHIRDS);
@@ -582,9 +644,11 @@ void getSensorData(FsrScpData& data) { // Read the data from the ADS 1115.
   data.amps5 = (amps5 * SCALE - Viout) / SENSITIVITY;
   data.amps6 = (amps6 * SCALE - Viout) / SENSITIVITY;
 
+  //convert Voltage to force
+  data.scp1 = Voltage2Force(scp1);
 }
 
-void tsaPosControl(float travelGoal, float radius, float L0, int MJ_BIN_m1[], int MJ_BIN_m2[], unsigned long duration) {
+void tsaPosControl(float travelGoal, float radius, float L0, int MJ_BIN_m1[], int MJ_BIN_m2[], unsigned long duration, state_t& fingJoints, int initPos) {
 
   /*
      The function controls the rotations of the motors by controlling the contraction
@@ -598,89 +662,201 @@ void tsaPosControl(float travelGoal, float radius, float L0, int MJ_BIN_m1[], in
 
   //compute the rotations needed to meet desired travel
   float needRots = dispToRots(travelGoal, radius, L0);  //RotsToDisp(n, radius, L0)
-  int GR = 10;
-  long int targetTicks = needRots * GR;
+  int GR = 30.0f; int CPR = 12.0;
+  long int targetTicks = needRots * CPR * GR;
   //position control using the computed rotations
-  trackingControlMM(ticks.m3, ticks.m4, MJ_BIN_m1, MJ_BIN_m2, targetTicks, duration);
-
+  trackingControlMM(ticks.m3, ticks.m4, MJ_BIN_m1, MJ_BIN_m2, targetTicks, duration, fingJoints, initPos);
 }
 
 
-
-void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN_m2[], long int targetTicks, unsigned long duration) {
+void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN_m2[],
+                       long int targetTicks, unsigned long duration, state_t& fingJoints, int initPos) {
   /*
      This function controls two antagonistic motors to attain a desired position of a finger
      In this case, it is assumed that the motors are of the same gear ratio, hence speed
      If the motors are of the different gear ratios, the faster motor needs to be slowed down
      by scaling the computed PWM. The scaling factor will be determined experimentally
+
+     It is assmued that the motor for M3 is winding clockwise to form form
+     Hardcode this into the state/state of the driving function
   */
 
-  int ER_MARGIN = 50;
-  long int err_m1 = m1_ticks - targetTicks;
-  long int err_m2 = m2_ticks - targetTicks;
+  //initialize time
+  unsigned long startTime, endTime;
+  double timeChange;
+
+  int ER_MARGIN = 1000;
+  long int err_m1 = abs(ticks.m3) - targetTicks;// m1_ticks
+  long int err_m2 = abs(ticks.m4) - targetTicks; //m2_ticks
   long int Err_m = 0;
 
-  if (abs(err_m1 > err_m2)) {
+  //get the direction flags
+  int m1_flg = sgn(ticks.m3);
+  int m2_flg = sgn(ticks.m4);
+
+  int m1_flg_new = m1_flg;
+  int m2_flg_new = m2_flg;
+
+  if (err_m1 > err_m2) {
     Err_m = err_m1;
   } else {
     Err_m = err_m2;
   }
-  // define PID control gains
-  float KP = 0.0005;
-  float KD = 0;
-  float loopTime = 0.02; //
 
+  // define PID control gains
+  float KP = 0.0003;
+  float KD = 0;
+  double loopTime = 0.02; //
+
+  // initialize position, velocity and acceleration
+  float theta_0 = 0.0f; float theta_1 = 0.0f;
+  float theta_2 = 0.0f; float theta_3 = 0.0f;
+
+  float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
+  float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
+
+  float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
+  float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
+
+  float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
+  float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
+  unsigned long nowTime;
 
   while (abs(Err_m) > ER_MARGIN) {
-
+    startTime = micros();
     double temp_command1 = KP * Err_m + KD * (Err_m / loopTime); //looptime is 1/frequency
 
     // normalize to PWM using tanh
     double vel_PD = tanh(temp_command1) * 255;
 
-    if (abs(vel_PD) < 80) { //minimum PWM to overcome friction
-      vel_PD  = 80;
+    if (abs(vel_PD) < 60) { //minimum PWM to overcome friction
+      vel_PD  = 60;
     }
 
-    if (Err_m > ER_MARGIN) { //overshot target, reverse
-      RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-      FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+    if (initPos == 0) {//finger is starting at the folded state
+      if (abs(Err_m) > ER_MARGIN) { //may have overshot target
+        if (sgn(Err_m) > 0) { //err was increasing, hence overshot, reverse
+          RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+        else {//err was negative, continue
+          FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+      }
+
+      if (abs(Err_m) < ER_MARGIN) { //may not have reached target
+        if (sgn(Err_m) > 0) { // err was positive, increasing -- continue
+          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+        else { //err was negative reverse
+          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+      }
     }
 
-    if (Err_m < ER_MARGIN) { //havent reached target, continue
-      FWD_Motors(MJ_BIN_m1, abs(vel_PD));
-      RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+    if (initPos == 1) { // finger is starting at the straight configuration
+      if (abs(Err_m) > ER_MARGIN) { //may have overshot target
+        if (sgn(Err_m) > 0) { //err was increasing, hence overshot, reverse
+          RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
+          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        }
+        else {//err was negative, continue
+          FWD_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
+          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        }
+      }
+
+      if (abs(Err_m) < ER_MARGIN) { //may not have reached target
+        if (sgn(Err_m) > 0) { // err was positive, increasing -- continue
+          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        }
+        else { //err was negative reverse
+          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        }
+      }
     }
+
+    //keep data from previous set. Only care about angles
+    angl_1_old = fingJoints.pos.x;
+    angl_2_old = fingJoints.pos.y;
+    angl_3_old = fingJoints.pos.z;
+
+    dot_angl_1_old = fingJoints.vel.x;
+    dot_angl_2_old = fingJoints.vel.y;
+    dot_angl_3_old = fingJoints.vel.z;
+
+    dDot_angl_1_old = fingJoints.acc.x;
+    dDot_angl_2_old = fingJoints.acc.y;
+    dDot_angl_3_old = fingJoints.acc.z;
 
     // read sensor data
-    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1);
-    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2);
-    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3);
-    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6);
+    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+
+    //compute angles using updated sensor info
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, BiasIMU6);
+
+    //get needed angles and compute derivatives
+    theta_0 = anglesNew1.aX + 180;
+    theta_1 = anglesNew2.aX + 180;
+    theta_2 = anglesNew3.aX + 180;
+    theta_3 = anglesNew6.aX + 180;
+
+    fingJoints.pos.x = theta_1 - theta_0;
+    fingJoints.pos.y = theta_2 - theta_1;
+    fingJoints.pos.z = theta_3 - theta_2;
+
+    endTime = micros();
+    timeChange = (endTime - startTime) * 1e-6;// dt is in seconds
+    loopTime = timeChange;
+
+    fingJoints.vel.x = (fingJoints.pos.x - angl_1_old) / timeChange;
+    fingJoints.vel.y = (fingJoints.pos.y - angl_2_old) / timeChange;
+    fingJoints.vel.z = (fingJoints.pos.z - angl_3_old) / timeChange;
+
+    fingJoints.acc.x = (fingJoints.vel.x - dot_angl_1_old) / timeChange;
+    fingJoints.acc.y = (fingJoints.vel.x - dot_angl_2_old) / timeChange;
+    fingJoints.acc.z = (fingJoints.vel.x - dot_angl_3_old) / timeChange;
+
+    duration = millis();
 
     getEncCounts(ticks, rots);
     getSensorData(sensorData);
-    /*
-        //update error and perform other computations
-        computeFingerAngle(filter0, accel1, gyro1, BiasIMU1, IMUAngs1);
-        computeFingerAngle(filter1, accel2, gyro2, BiasIMU2, IMUAngs2);
-        computeFingerAngle(filter2, accel3, gyro3, BiasIMU3, IMUAngs3);
-        computeFingerAngle(filter3, accel6, gyro6, BiasIMU6, IMUAngs6);
-    */
-    computeFingerAngleCF(accel1, gyro1, anglesOld1, BiasIMU1);
-    computeFingerAngleCF(accel2, gyro2, anglesOld2, BiasIMU2);
-    computeFingerAngleCF(accel3, gyro3, anglesOld3, BiasIMU3);
-    computeFingerAngleCF(accel6, gyro6, anglesOld6, BiasIMU6);
 
     // we know where these motors are connected for their encoders
-    err_m1 = ticks.m3 - targetTicks;
-    err_m2 = ticks.m4 - targetTicks;
+    err_m1 = abs(ticks.m3) - targetTicks;
+    err_m2 = abs(ticks.m4) - targetTicks;
 
-    if (abs(err_m1 > err_m2)) {
+    //get the flags
+    m1_flg_new = sgn(ticks.m3);
+    m2_flg_new = sgn(ticks.m4);
+
+    if (abs(err_m1) > abs(err_m2)) {
       Err_m = err_m1;
     } else {
       Err_m = err_m2;
     }
+
+    /*
+       check for change of direction of the ticks. This allows for controlling motor
+       rotations regardless of the initial direction of the motors
+    */
+    if ((m1_flg_new != m1_flg)  || (m2_flg_new != m2_flg) ) { //
+      if (abs(Err_m) < 1000) { //
+        Err_m = -1 * Err_m;
+      }
+    }
+
     /*
       Serial.print(Err_m); Serial.print(","); Serial.print(vel_PD);
       Serial.print(","); Serial.print(temp_command1);
@@ -737,75 +913,107 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
           dataFile.print(sensorData.amps4); dataFile.print(",");
           dataFile.print(sensorData.scp1); dataFile.print(",");
 
-          dataFile.print(duration * 1e-6, 3);
+          dataFile.print(duration * 1e-3, 3);
+
+          dataFile.print(fingJoints.pos.x); dataFile.print(",");
+          dataFile.print(fingJoints.pos.y); dataFile.print(",");
+          dataFile.print(fingJoints.pos.z); dataFile.print(",");
+
+          dataFile.print(fingJoints.vel.x); dataFile.print(",");
+          dataFile.print(fingJoints.vel.y); dataFile.print(",");
+          dataFile.print(fingJoints.vel.z); dataFile.print(",");
+
+          dataFile.print(fingJoints.acc.x); dataFile.print(",");
+          dataFile.print(fingJoints.acc.y); dataFile.print(",");
+          dataFile.print(fingJoints.acc.z); dataFile.print(",");
+
           dataFile.println();
           dataFile.close();
         }
     */
-    /*
-          Serial.print(accel1.acceleration.x); Serial.print(",");
-          Serial.print(accel1.acceleration.y); Serial.print(",");
-          Serial.print(accel1.acceleration.z); Serial.print(",");
+/*
+    Serial.print(accel1.acceleration.x); Serial.print(",");
+    Serial.print(accel1.acceleration.y); Serial.print(",");
+    Serial.print(accel1.acceleration.z); Serial.print(",");
 
-          Serial.print(accel2.acceleration.x); Serial.print(",");
-          Serial.print(accel2.acceleration.y); Serial.print(",");
-          Serial.print(accel2.acceleration.z); Serial.print(",");
+    Serial.print(accel2.acceleration.x); Serial.print(",");
+    Serial.print(accel2.acceleration.y); Serial.print(",");
+    Serial.print(accel2.acceleration.z); Serial.print(",");
 
-          Serial.print(accel3.acceleration.x); Serial.print(",");
-          Serial.print(accel3.acceleration.y); Serial.print(",");
-          Serial.print(accel3.acceleration.z); Serial.print(",");
+    Serial.print(accel3.acceleration.x); Serial.print(",");
+    Serial.print(accel3.acceleration.y); Serial.print(",");
+    Serial.print(accel3.acceleration.z); Serial.print(",");
 
-          Serial.print(accel6.acceleration.x); Serial.print(",");
-          Serial.print(accel6.acceleration.y); Serial.print(",");
-          Serial.print(accel6.acceleration.z); Serial.print(",");
+    Serial.print(accel6.acceleration.x); Serial.print(",");
+    Serial.print(accel6.acceleration.y); Serial.print(",");
+    Serial.print(accel6.acceleration.z); Serial.print(",");
 
-          Serial.print(gyro1.gyro.x); Serial.print(",");
-          Serial.print(gyro1.gyro.y); Serial.print(",");
-          Serial.print(gyro1.gyro.z); Serial.print(",");
+    Serial.print(gyro1.gyro.x); Serial.print(",");
+    Serial.print(gyro1.gyro.y); Serial.print(",");
+    Serial.print(gyro1.gyro.z); Serial.print(",");
 
-          Serial.print(gyro2.gyro.x); Serial.print(",");
-          Serial.print(gyro2.gyro.y); Serial.print(",");
-          Serial.print(gyro2.gyro.z); Serial.print(",");
+    Serial.print(gyro2.gyro.x); Serial.print(",");
+    Serial.print(gyro2.gyro.y); Serial.print(",");
+    Serial.print(gyro2.gyro.z); Serial.print(",");
 
-          Serial.print(gyro3.gyro.x); Serial.print(",");
-          Serial.print(gyro3.gyro.y); Serial.print(",");
-          Serial.print(gyro3.gyro.z); Serial.print(",");
+    Serial.print(gyro3.gyro.x); Serial.print(",");
+    Serial.print(gyro3.gyro.y); Serial.print(",");
+    Serial.print(gyro3.gyro.z); Serial.print(",");
 
-          Serial.print(gyro6.gyro.x); Serial.print(",");
-          Serial.print(gyro6.gyro.y); Serial.print(",");
-          Serial.print(gyro6.gyro.z); Serial.print(",");
+    Serial.print(gyro6.gyro.x); Serial.print(",");
+    Serial.print(gyro6.gyro.y); Serial.print(",");
+    Serial.print(gyro6.gyro.z); Serial.print(",");
 
-          Serial.print(anglesOld1.aX, 3); Serial.print(",");
-          Serial.print(anglesOld2.aX, 3); Serial.print(",");
-          Serial.print(anglesOld3.aX, 3); Serial.print(",");
-          Serial.print(anglesOld6.aX, 3); Serial.print(",");
-
-          Serial.print(ticks.m3); Serial.print(",");
-          Serial.print(rots.m3); Serial.print(",");
-          Serial.print(ticks.m4); Serial.print(",");
-          Serial.print(rots.m4); Serial.print(",");
-
-          Serial.print(sensorData.amps3); Serial.print(",");
-          Serial.print(sensorData.amps4); Serial.print(",");
-          Serial.print(sensorData.scp1); Serial.print(",");
-
-          Serial.print(duration * 1e-6, 3);
-          Serial.println();
-    */
+    Serial.print(anglesNew1.aX, 3); Serial.print(",");
+    Serial.print(anglesNew2.aX, 3); Serial.print(",");
+    Serial.print(anglesNew3.aX, 3); Serial.print(",");
+    Serial.print(anglesNew6.aX, 3); Serial.print(","); */
 
     Serial.print(ticks.m3); Serial.print(",");
     Serial.print(rots.m3); Serial.print(",");
     Serial.print(ticks.m4); Serial.print(",");
     Serial.print(rots.m4); Serial.print(",");
-    Serial.print(duration * 1e-6, 3);
+
+    Serial.print(sensorData.amps3); Serial.print(",");
+    Serial.print(sensorData.amps4); Serial.print(",");
+    Serial.print(sensorData.scp1); Serial.print(",");
+
+    Serial.print(duration * 1e-3, 3); Serial.print(",");//36
+/*
+    Serial.print(theta_0); Serial.print(",");
+    Serial.print(theta_1); Serial.print(",");
+    Serial.print(theta_2); Serial.print(",");
+    Serial.print(theta_3); Serial.print(",");
+
+    Serial.print(fingJoints.pos.x); Serial.print(","); //41
+    Serial.print(fingJoints.pos.y); Serial.print(",");
+    Serial.print(fingJoints.pos.z); Serial.print(",");
+
+    Serial.print(fingJoints.vel.x); Serial.print(",");
+    Serial.print(fingJoints.vel.y); Serial.print(",");
+    Serial.print(fingJoints.vel.z); Serial.print(",");
+
+    Serial.print(fingJoints.acc.x); Serial.print(",");
+    Serial.print(fingJoints.acc.y); Serial.print(",");
+    Serial.print(fingJoints.acc.z); */
+
     Serial.println();
 
+    /*
+        Serial.print(ticks.m3); Serial.print(",");
+        Serial.print(rots.m3); Serial.print(",");
+        Serial.print(ticks.m4); Serial.print(",");
+        Serial.print(rots.m4); Serial.print(",");
+        Serial.print(Err_m); Serial.print(",");
+        Serial.print(targetTicks / (12 * 30)); Serial.print(",");
+        Serial.print(duration * 1e-3, 3);
+        Serial.println();
+    */
   }
 
   //reached desired position, so stop
   STOP_Motors(MJ_BIN_m1);
   STOP_Motors(MJ_BIN_m2);
-
 }
 
 void trackingControl1(Encoder motor, int MJ_BIN[], float targetTicks) { //looking at an encoder object
@@ -841,7 +1049,7 @@ void trackingControl1(Encoder motor, int MJ_BIN[], float targetTicks) { //lookin
   STOP_Motors(MJ_BIN);
 }
 
-void forceControlPD(FsrScpData& sensData, float target_force, int MJ_BIN1[],
+void forceControlPD(FsrScpData_t& sensData, float target_force, int MJ_BIN1[],
                     int MJ_BIN2[], float motorSpeed1, float motorSpeed2) {
   /*
      This function controls the speeds of two motors (of the same GR) that control one finger
@@ -892,48 +1100,7 @@ void forceControlPD(FsrScpData& sensData, float target_force, int MJ_BIN1[],
   }
 }
 
-/*
-  void computeFingerAngle(sensors_event_t& acc1, sensors_event_t& gyro1,
-                        sensors_event_t& acc2, sensors_event_t& gyro2,
-                        sensors_event_t& acc3, sensors_event_t& gyro3,
-                        sensors_event_t& acc4, sensors_event_t& gyro4, fingAngles& fin_angles) {
-
-  // update the filter, which computes orientation
-  filter0.updateIMU(gyro1.gyro.x, gyro1.gyro.y, gyro1.gyro.z,
-                    acc1.acceleration.x, acc1.acceleration.y, acc1.acceleration.z);
-  filter1.updateIMU(gyro2.gyro.x, gyro2.gyro.y, gyro2.gyro.z,
-                    acc2.acceleration.x, acc2.acceleration.y, acc2.acceleration.z);
-  filter2.updateIMU(gyro3.gyro.x, gyro3.gyro.y, gyro3.gyro.z,
-                    acc3.acceleration.x, acc3.acceleration.y, acc3.acceleration.z);
-  filter3.updateIMU(gyro4.gyro.x, gyro4.gyro.y, gyro4.gyro.z,
-                    acc4.acceleration.x, acc4.acceleration.y, acc4.acceleration.z);
-  //compute angle
-  float DegToRad = 3.14159265 / 180.0;
-  float roll0 = filter0.getRoll() * DegToRad;
-  float roll1 = filter1.getRoll() * DegToRad;
-  float roll2 = filter2.getRoll() * DegToRad;
-  float roll3 = filter3.getRoll() * DegToRad;
-
-  fin_angles.a1 = roll1 - roll0;
-  fin_angles.a2 = roll2 - roll1;
-  fin_angles.a3 = roll3 - roll2;
-  }
-*/
-
-void computeFingerAngle(Madgwick head, sensors_event_t& acc, sensors_event_t& gyr,
-                        AnglesComps& BiasIMU, EulerAngIMU& IMUAngs) {
-
-  // update the filter, which computes orientation. The axis needs to be flipped
-  head.updateIMU((gyr.gyro.x - BiasIMU.gX), (gyr.gyro.y - BiasIMU.gY), (gyr.gyro.z - BiasIMU.gZ),
-                 acc.acceleration.x, acc.acceleration.y, acc.acceleration.z);
-
-  //compute inclination of IMU
-  float DegToRad = 3.14159265 / 180.0;
-  IMUAngs.roll = head.getRoll() * DegToRad;
-  IMUAngs.pitch = head.getPitch() * DegToRad;
-}
-
-void computeFingerAngleCF(sensors_event_t& acc, sensors_event_t& gyr, AnglesComps& anglesHist, AnglesComps& BiasIMU) {
+void computeFingerAngleCF(sensors_event_t& acc, sensors_event_t& gyr, AnglesComps_t& anglesHist, AnglesComps_t& BiasIMU) {
   float RADIANS_TO_DEGREES = 180 / 3.14159;
   float dt = anglesHist.d_time;
 
@@ -998,4 +1165,75 @@ void butControlRVS(int pinNum) {
     RVS_Motors(M_one, 150.0); //using motors in J3, J4
     FWD_Motors(M_two, 150.0); //
   }
+}
+
+void computedTorqueController (double state_pos[3], double state_vel[3], double torque,
+                               state_t& theta_d, float currTime, trq_t tau_comp,
+                               double M[9], double C[9], double B[9], double G[3]) {
+
+  /*
+     state_pos is the current joint angles of the fingers. specifically [JointAngles.theta_1, JointAngles.theta_2, JointAngles.theta_3];
+     state_vel is the current joint speeds. differentiate state_pos above
+     theta_d holds the desired position and velocity and accelaration eg. theta_d.pos.x
+     M, C, B, G are defined as global variables hence can be accessed outside the scope of this function
+     Can be re-inialized here if they are to be defined as local variables.
+  */
+
+  dynamics(state_pos, fin_length, M, C, B, G); //update M,C,B,G given state_pos and fin_length
+
+  /*
+     please note that x=theta_1, y=theta_2,z = theta_3
+  */
+
+  tmm::SquareMatrix<3> eye = tmm::Identity<3>();
+  
+  
+  //------------------------------------//
+  const tmm::Scalar K_p[2][2] = {
+  {55, 0},
+  {0, 55}
+  };
+  tmm::SquareMatrix<2> Kp(K_p);
+
+  const tmm::Scalar K_v[2][2] = {
+  {15, 0},
+  {0, 15}
+  };
+  tmm::SquareMatrix<2> Kv(K_v);
+
+  float theta_err_1 = theta_d.pos.x - state_pos[1];
+  float theta_err_2 = theta_d.pos.y - state_pos[2];
+  float theta_err_3 = theta_d.pos.z - state_pos[3];
+
+  float theta_err_dot_1 = theta_d.vel.x - state_vel[1];
+  float theta_err_dot_2 = theta_d.vel.y - state_vel[2];
+  float theta_err_dot_3 = theta_d.vel.z - state_vel[3];
+
+  float err[] = {theta_err_1, theta_err_2, theta_err_3};
+  float err_dot[] = {theta_err_dot_1, theta_err_dot_2, theta_err_dot_3};
+
+  //  float u = -1 * Kv * err_dot - Kp * err;
+
+  float theta_err_ddot_1 = theta_d.acc.x;
+  float theta_err_ddot_2 = theta_d.acc.x;
+  float theta_err_ddot_3 = theta_d.acc.x;
+
+  /*
+     note that joints cannot generate infinitely large torques or forces. Need to set a torque_limit
+  */
+}
+
+void computeJointAngles(jntAngl_t& JointAngles, AnglesComps_t& Angle1, AnglesComps_t& Angle2, AnglesComps_t& Angle3, AnglesComps_t& Angle4 ) {
+  /*
+     Computes the actual finger joints from the measured four IMU angles of each finger
+  */
+  float theta_1 = Angle1.aX + 180;
+  float theta_2 = Angle2.aX + 180;
+  float theta_3 = Angle3.aX + 180;
+  float theta_4 = Angle4.aX + 180;
+
+  JointAngles.theta_1 = theta_2 - theta_1;
+  JointAngles.theta_2 = theta_3 - theta_2;
+  JointAngles.theta_3 = theta_4 - theta_3;
+
 }
