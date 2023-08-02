@@ -33,7 +33,7 @@ float Kt_50 = 1 / 0.19;
 
 EncderCounts_t ticks;
 encRevs_t rots;
-float goalRots = 20; //92, 90
+float goalRots = 90; //92, 90, 20
 int gr = 30.0f; int cpr = 12.0;
 long int goalTicks = goalRots * gr * cpr; // GR = 15;
 
@@ -111,7 +111,7 @@ float start_time_2; float start_time;
 
 // initialize variables to pace updates to correct rate
 float dt = (1 / SAMPLE_RATE);
-  
+
 unsigned long t_now;
 unsigned long t_dur;
 unsigned long t_tic, t_toc, d_t_C; //timing calibrations
@@ -262,14 +262,14 @@ void setup(void) {
   t_dur = millis(); t_now = millis();
 
   // control
-  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
-  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
+  //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
+  //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
 
 }
 
 void loop(void) {
   //butControl(pinNum); //CW for top motor
-  //butControlRVS(pinNum); //CCW for top motor
+  butControlRVS(pinNum); //CCW for top motor
   t_now = millis();
   if (t_now - millisPrevious >= millisPerReading) {
 
@@ -712,6 +712,24 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
   float theta_0 = 0.0f; float theta_1 = 0.0f;
   float theta_2 = 0.0f; float theta_3 = 0.0f;
 
+  //initialize filtered angles
+  float theta_0f = 0.0f; float theta_1f = 0.0f;
+  float theta_2f = 0.0f; float theta_3f = 0.0f;
+
+  //create instances for the filters
+  LowPass<1> lp_0(3, 1e2, true);
+  LowPass<1> lp_1(3, 1e2, true);
+  LowPass<1> lp_2(3, 1e2, true);
+  LowPass<1> lp_3(3, 1e2, true);
+
+  LowPass<1> lp_4(3, 1e2, true);
+  LowPass<1> lp_5(3, 1e2, true);
+  LowPass<1> lp_6(3, 1e2, true);
+
+  LowPass<1> lp_7(3, 1e2, true);
+  LowPass<1> lp_8(3, 1e2, true);
+  LowPass<1> lp_9(3, 1e2, true);
+
   float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
   float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
 
@@ -812,9 +830,15 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     theta_2 = anglesNew3.aX + 180;
     theta_3 = anglesNew6.aX + 180;
 
-    fingJoints.pos.x = theta_1 - theta_0;
-    fingJoints.pos.y = theta_2 - theta_1;
-    fingJoints.pos.z = theta_3 - theta_2;
+    //filter the angles
+    theta_0f = lp_0.filt(theta_0);
+    theta_1f = lp_1.filt(theta_1);
+    theta_2f = lp_2.filt(theta_2);
+    theta_3f = lp_3.filt(theta_3);
+
+    fingJoints.pos.x = theta_1f - theta_0f;
+    fingJoints.pos.y = theta_2f - theta_1f;
+    fingJoints.pos.z = theta_3f - theta_2f;
 
     endTime = micros();
     timeChange = (endTime - startTime) * 1e-6;// dt is in seconds
@@ -824,9 +848,17 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     fingJoints.vel.y = (fingJoints.pos.y - angl_2_old) / timeChange;
     fingJoints.vel.z = (fingJoints.pos.z - angl_3_old) / timeChange;
 
+    fingJoints.vel.x = lp_4.filt(fingJoints.vel.x);
+    fingJoints.vel.y = lp_5.filt(fingJoints.vel.y);
+    fingJoints.vel.z = lp_6.filt(fingJoints.vel.z);
+
     fingJoints.acc.x = (fingJoints.vel.x - dot_angl_1_old) / timeChange;
-    fingJoints.acc.y = (fingJoints.vel.x - dot_angl_2_old) / timeChange;
-    fingJoints.acc.z = (fingJoints.vel.x - dot_angl_3_old) / timeChange;
+    fingJoints.acc.y = (fingJoints.vel.y - dot_angl_2_old) / timeChange;
+    fingJoints.acc.z = (fingJoints.vel.z - dot_angl_3_old) / timeChange;
+
+    fingJoints.acc.x = lp_7.filt(fingJoints.acc.x);
+    fingJoints.acc.y = lp_8.filt(fingJoints.acc.y);
+    fingJoints.acc.z = lp_9.filt(fingJoints.acc.z);
 
     duration = millis();
 
@@ -851,6 +883,7 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
        check for change of direction of the ticks. This allows for controlling motor
        rotations regardless of the initial direction of the motors
     */
+
     if ((m1_flg_new != m1_flg)  || (m2_flg_new != m2_flg) ) { //
       if (abs(Err_m) < 1000) { //
         Err_m = -1 * Err_m;
@@ -931,7 +964,7 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
           dataFile.close();
         }
     */
-/*
+    
     Serial.print(accel1.acceleration.x); Serial.print(",");
     Serial.print(accel1.acceleration.y); Serial.print(",");
     Serial.print(accel1.acceleration.z); Serial.print(",");
@@ -962,12 +995,12 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
 
     Serial.print(gyro6.gyro.x); Serial.print(",");
     Serial.print(gyro6.gyro.y); Serial.print(",");
-    Serial.print(gyro6.gyro.z); Serial.print(",");
+    Serial.print(gyro6.gyro.z); Serial.print(",");//24
 
     Serial.print(anglesNew1.aX, 3); Serial.print(",");
     Serial.print(anglesNew2.aX, 3); Serial.print(",");
     Serial.print(anglesNew3.aX, 3); Serial.print(",");
-    Serial.print(anglesNew6.aX, 3); Serial.print(","); */
+    Serial.print(anglesNew6.aX, 3); Serial.print(",");
 
     Serial.print(ticks.m3); Serial.print(",");
     Serial.print(rots.m3); Serial.print(",");
@@ -979,11 +1012,16 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     Serial.print(sensorData.scp1); Serial.print(",");
 
     Serial.print(duration * 1e-3, 3); Serial.print(",");//36
-/*
+
     Serial.print(theta_0); Serial.print(",");
     Serial.print(theta_1); Serial.print(",");
     Serial.print(theta_2); Serial.print(",");
     Serial.print(theta_3); Serial.print(",");
+
+    Serial.print(theta_0f); Serial.print(",");
+    Serial.print(theta_1f); Serial.print(",");
+    Serial.print(theta_2f); Serial.print(",");
+    Serial.print(theta_3f); Serial.print(",");
 
     Serial.print(fingJoints.pos.x); Serial.print(","); //41
     Serial.print(fingJoints.pos.y); Serial.print(",");
@@ -995,7 +1033,7 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
 
     Serial.print(fingJoints.acc.x); Serial.print(",");
     Serial.print(fingJoints.acc.y); Serial.print(",");
-    Serial.print(fingJoints.acc.z); */
+    Serial.print(fingJoints.acc.z);
 
     Serial.println();
 
@@ -1170,7 +1208,6 @@ void butControlRVS(int pinNum) {
 void computedTorqueController (double state_pos[3], double state_vel[3], double torque,
                                state_t& theta_d, float currTime, trq_t tau_comp,
                                double M[9], double C[9], double B[9], double G[3]) {
-
   /*
      state_pos is the current joint angles of the fingers. specifically [JointAngles.theta_1, JointAngles.theta_2, JointAngles.theta_3];
      state_vel is the current joint speeds. differentiate state_pos above
@@ -1181,56 +1218,121 @@ void computedTorqueController (double state_pos[3], double state_vel[3], double 
 
   dynamics(state_pos, fin_length, M, C, B, G); //update M,C,B,G given state_pos and fin_length
 
+  //create appropriate dimensions for matrices
+
+  tmm::Scalar M_1[3][3] = {
+    {M[0], M[1], M[2]},
+    {M[3], M[4], M[5]},
+    {M[6], M[7], M[8]}
+  };
+
+  tmm::SquareMatrix<3> M_m(M_1);
+
+  tmm::Scalar C_1[3][3] = {
+    {C[0], C[1], C[2]},
+    {C[3], C[4], C[5]},
+    {C[6], C[7], C[8]}
+  };
+
+  tmm::SquareMatrix<3> C_m(C_1);
+
+  tmm::Scalar B_1[3][3] = {
+    {B[0], B[1], B[2]},
+    {B[3], B[4], B[5]},
+    {B[6], B[7], B[8]}
+  };
+
+  tmm::SquareMatrix<3> B_m(B_1);
+
+  tmm::Scalar G_1[3][1] = {
+    {G[0]},
+    {G[1]},
+    {G[2]}
+  };
+
+  tmm::Matrix<3, 1> G_m(G_1);
+
   /*
      please note that x=theta_1, y=theta_2,z = theta_3
   */
 
-  tmm::SquareMatrix<3> eye = tmm::Identity<3>();
-  
-  
   //------------------------------------//
-  const tmm::Scalar K_p[2][2] = {
-  {55, 0},
-  {0, 55}
+  const tmm::Scalar K_p[3][3] = {
+    {55, 0, 0},
+    {0, 55, 0},
+    {0, 0, 55}
   };
-  tmm::SquareMatrix<2> Kp(K_p);
+  tmm::SquareMatrix<3> Kp(K_p);
 
-  const tmm::Scalar K_v[2][2] = {
-  {15, 0},
-  {0, 15}
+  const tmm::Scalar K_v[3][3] = {
+    {15, 0, 0},
+    {0, 15, 0},
+    {0, 0, 15}
   };
-  tmm::SquareMatrix<2> Kv(K_v);
+  tmm::SquareMatrix<3> Kv(K_v);
 
-  float theta_err_1 = theta_d.pos.x - state_pos[1];
-  float theta_err_2 = theta_d.pos.y - state_pos[2];
-  float theta_err_3 = theta_d.pos.z - state_pos[3];
+  float theta_err_1 = theta_d.pos.x - state_pos[0];
+  float theta_err_2 = theta_d.pos.y - state_pos[1];
+  float theta_err_3 = theta_d.pos.z - state_pos[2];
 
-  float theta_err_dot_1 = theta_d.vel.x - state_vel[1];
-  float theta_err_dot_2 = theta_d.vel.y - state_vel[2];
-  float theta_err_dot_3 = theta_d.vel.z - state_vel[3];
+  float theta_err_dot_1 = theta_d.vel.x - state_vel[0];
+  float theta_err_dot_2 = theta_d.vel.y - state_vel[1];
+  float theta_err_dot_3 = theta_d.vel.z - state_vel[2];
 
-  float err[] = {theta_err_1, theta_err_2, theta_err_3};
-  float err_dot[] = {theta_err_dot_1, theta_err_dot_2, theta_err_dot_3};
+  tmm::Scalar err_1[3][1] = {
+    {theta_err_1},
+    {theta_err_1},
+    {theta_err_1}
+  };
+
+  tmm::Matrix<3, 1> err(err_1);
+
+  tmm::Scalar err_dot_1[3][1] = {
+    {theta_err_dot_1},
+    {theta_err_dot_2},
+    {theta_err_dot_3}
+  };
+
+  tmm::Matrix<3, 1> err_dot(err_dot_1);
+
+  tmm::Scalar acc_des_1[3][1] = {
+    {theta_d.acc.x},
+    {theta_d.acc.y},
+    {theta_d.acc.z}
+  };
+
+  tmm::Matrix<3, 1> acc_des(acc_des_1);
 
   //  float u = -1 * Kv * err_dot - Kp * err;
 
-  float theta_err_ddot_1 = theta_d.acc.x;
-  float theta_err_ddot_2 = theta_d.acc.x;
-  float theta_err_ddot_3 = theta_d.acc.x;
+  tmm::Matrix<3, 1> U = Kv * -1 * err_dot - Kp * err;
+
+  tmm::Matrix<3, 1> tau_c = M_m * (acc_des - U) + G_m;
+
+  tau_comp.tau_1 = tau_c[0][1];
+  tau_comp.tau_2 = tau_c[1][1];
+  tau_comp.tau_3 = tau_c[2][1];
+
 
   /*
      note that joints cannot generate infinitely large torques or forces. Need to set a torque_limit
   */
+
 }
 
 void computeJointAngles(jntAngl_t& JointAngles, AnglesComps_t& Angle1, AnglesComps_t& Angle2, AnglesComps_t& Angle3, AnglesComps_t& Angle4 ) {
   /*
      Computes the actual finger joints from the measured four IMU angles of each finger
   */
-  float theta_1 = Angle1.aX + 180;
-  float theta_2 = Angle2.aX + 180;
-  float theta_3 = Angle3.aX + 180;
-  float theta_4 = Angle4.aX + 180;
+  LowPass<1> lp_0(3, 1e2, true);
+  LowPass<1> lp_1(3, 1e2, true);
+  LowPass<1> lp_2(3, 1e2, true);
+  LowPass<1> lp_3(3, 1e2, true);
+
+  float theta_1 = lp_0.filt(Angle1.aX + 180);
+  float theta_2 = lp_1.filt(Angle2.aX + 180);
+  float theta_3 = lp_2.filt(Angle3.aX + 180);
+  float theta_4 = lp_3.filt(Angle4.aX + 180);
 
   JointAngles.theta_1 = theta_2 - theta_1;
   JointAngles.theta_2 = theta_3 - theta_2;
