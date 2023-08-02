@@ -257,19 +257,19 @@ void setup(void) {
   Serial.println("Starting to run main code...");
 
   //finger position
-  int posFingr = 1;
+  int posFingr = 0;
 
   t_dur = millis(); t_now = millis();
 
   // control
-  //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
-  //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
+  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
+  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
 
 }
 
 void loop(void) {
   //butControl(pinNum); //CW for top motor
-  butControlRVS(pinNum); //CCW for top motor
+  //butControlRVS(pinNum); //CCW for top motor
   t_now = millis();
   if (t_now - millisPrevious >= millisPerReading) {
 
@@ -1208,6 +1208,7 @@ void butControlRVS(int pinNum) {
 void computedTorqueController (double state_pos[3], double state_vel[3], double torque,
                                state_t& theta_d, float currTime, trq_t tau_comp,
                                double M[9], double C[9], double B[9], double G[3]) {
+                                
   /*
      state_pos is the current joint angles of the fingers. specifically [JointAngles.theta_1, JointAngles.theta_2, JointAngles.theta_3];
      state_vel is the current joint speeds. differentiate state_pos above
@@ -1312,6 +1313,7 @@ void computedTorqueController (double state_pos[3], double state_vel[3], double 
   tau_comp.tau_1 = tau_c[0][1];
   tau_comp.tau_2 = tau_c[1][1];
   tau_comp.tau_3 = tau_c[2][1];
+
 
 
   /*
