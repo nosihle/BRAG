@@ -33,28 +33,28 @@ float Kt_50 = 1 / 0.19;
 
 EncderCounts_t ticks;
 encRevs_t rots;
-float goalRots = 40; //92, 90, 20, 80
+float goalRots = 60; //92, 90, 20, 80
 int gr = 30.0f; int cpr = 12.0;
 long int goalTicks = goalRots * gr * cpr; // GR = 15;
 
 //---------------------------------------------------------------------
 //Define motor direction control pins
-const int MJ1_BIN1 = 0, MJ1_BIN2 = 1, MJ2_BIN1 = 22, MJ2_BIN2 = 23;
-const int MJ3_BIN1 = 33, MJ3_BIN2 = 12, MJ4_BIN1 = 36, MJ4_BIN2 = 37;
-const int MJ5_BIN1 = 24, MJ5_BIN2 = 25, MJ6_BIN1 = 28, MJ6_BIN2 = 29;
-const int MJ_BIN[] = {MJ1_BIN1, MJ1_BIN2, MJ2_BIN1, MJ2_BIN2, MJ3_BIN1, MJ3_BIN2,
+ int MJ1_BIN1 = 0, MJ1_BIN2 = 1, MJ2_BIN1 = 22, MJ2_BIN2 = 23;
+ int MJ3_BIN1 = 33, MJ3_BIN2 = 12, MJ4_BIN1 = 36, MJ4_BIN2 = 37;
+ int MJ5_BIN1 = 24, MJ5_BIN2 = 25, MJ6_BIN1 = 28, MJ6_BIN2 = 29;
+ int MJ_BIN[] = {MJ1_BIN1, MJ1_BIN2, MJ2_BIN1, MJ2_BIN2, MJ3_BIN1, MJ3_BIN2,
                       MJ4_BIN1, MJ4_BIN2, MJ5_BIN1, MJ5_BIN2, MJ6_BIN1, MJ6_BIN2
                      }; //All motor pins
 //define motors individually, easier for control implementation
-const int m_FNT1[] = {MJ_BIN[0], MJ_BIN[1]}, m_FNT2[] = {MJ_BIN[2], MJ_BIN[3]};
-const int m_FNT3[] = {MJ_BIN[4], MJ_BIN[5]}, m_FNT4[] = {MJ_BIN[6], MJ_BIN[7]};
-const int m_BCK1[] = {MJ_BIN[8], MJ_BIN[9]}, m_BCK2[] = {MJ_BIN[10], MJ_BIN[11]};
+ int m_FNT1[] = {MJ_BIN[0], MJ_BIN[1]}, m_FNT2[] = {MJ_BIN[2], MJ_BIN[3]};
+ int m_FNT3[] = {MJ_BIN[4], MJ_BIN[5]}, m_FNT4[] = {MJ_BIN[6], MJ_BIN[7]};
+ int m_BCK1[] = {MJ_BIN[8], MJ_BIN[9]}, m_BCK2[] = {MJ_BIN[10], MJ_BIN[11]};
 
 //---------------------------------------------------------------------
 //Define encoder a and b state pins
-const int MJ1_EN_A = 2, MJ1_EN_B = 3, MJ2_EN_A = 5, MJ2_EN_B = 4;
-const int MJ3_EN_A = 6, MJ3_EN_B = 7, MJ4_EN_A = 8, MJ4_EN_B = 9;
-const int MJ5_EN_A = 10, MJ5_EN_B = 11, MJ6_EN_A = 16, MJ6_EN_B = 17;
+ int MJ1_EN_A = 2, MJ1_EN_B = 3, MJ2_EN_A = 5, MJ2_EN_B = 4;
+ int MJ3_EN_A = 6, MJ3_EN_B = 7, MJ4_EN_A = 8, MJ4_EN_B = 9;
+ int MJ5_EN_A = 10, MJ5_EN_B = 11, MJ6_EN_A = 16, MJ6_EN_B = 17;
 
 //---------------------------------------------------------------------
 //Create 6 encoder objects for the six motors
@@ -104,6 +104,7 @@ sensors_event_t temp1, temp2, temp3, temp4, temp5, temp6, temp7, temp8, temp1_la
 
 fingAngles_t fin_angles;
 AnglesComps_t anglesNew1, anglesNew2, anglesNew3, anglesNew6;
+AnglesDerivatives_t velAcc1, velAcc2, velAcc3, velAcc6;
 AnglesComps_t BiasIMU1, BiasIMU2, BiasIMU3, BiasIMU6;
 EulerAngIMU_t IMUAngs1, IMUAngs2, IMUAngs3, IMUAngs6;
 
@@ -331,10 +332,10 @@ void loop(void) {
       state_pos[2] = fin_angles.a3;
     */
 
-    computeFingerAngleCF(accel1, gyro1, anglesNew1, BiasIMU1);
-    computeFingerAngleCF(accel2, gyro2, anglesNew2, BiasIMU2);
-    computeFingerAngleCF(accel3, gyro3, anglesNew3, BiasIMU3);
-    computeFingerAngleCF(accel6, gyro6, anglesNew6, BiasIMU6);
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
 
     /*
         // control
@@ -669,7 +670,7 @@ void tsaPosControl(float travelGoal, float radius, float L0, int MJ_BIN_m1[], in
 }
 
 
-void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN_m2[],
+void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BIN_m2[2],
                        long int targetTicks, unsigned long duration, state_t& fingJoints, int initPos) {
   /*
      This function controls two antagonistic motors to attain a desired position of a finger
@@ -721,6 +722,7 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
 
   float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
   float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
+  float vel_1_old = 0.0f; float vel_2_old = 0.0f; float vel_3_old = 0.0f; float vel_4_old = 0.0f;
 
   float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
   float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
@@ -802,6 +804,11 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     dDot_angl_2_old = fingJoints.acc.y;
     dDot_angl_3_old = fingJoints.acc.z;
 
+     vel_1_old = velAcc1.pVel; 
+     vel_2_old = velAcc2.pVel; 
+     vel_3_old = velAcc3.pVel; 
+     vel_4_old = velAcc6.pVel;
+
     // read sensor data
     readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
     readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
@@ -809,10 +816,10 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
 
     //compute angles using updated sensor info
-    computeFingerAngleCF(accel1, gyro1, anglesNew1, BiasIMU1);
-    computeFingerAngleCF(accel2, gyro2, anglesNew2, BiasIMU2);
-    computeFingerAngleCF(accel3, gyro3, anglesNew3, BiasIMU3);
-    computeFingerAngleCF(accel6, gyro6, anglesNew6, BiasIMU6);
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
 
     //get needed angles and compute derivatives
     theta_0 = anglesNew1.aX + 180;
@@ -831,19 +838,24 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
 
     dot_angl_1 = (fingJoints.pos.x - angl_1_old) / timeChange;
     dot_angl_2 = (fingJoints.pos.y - angl_2_old) / timeChange;
-    dot_angl_3= (fingJoints.pos.z - angl_3_old) / timeChange;
+    dot_angl_3 = (fingJoints.pos.z - angl_3_old) / timeChange;
 
-    fingJoints.vel.x = 0.8*dot_angl_1_old + 0.0155*dot_angl_1;
-    fingJoints.vel.y = 0.8*dot_angl_2_old + 0.0155*dot_angl_2;
-    fingJoints.vel.z = 0.8*dot_angl_3_old + 0.0155*dot_angl_3;
+    fingJoints.vel.x = 0.8 * dot_angl_1_old + 0.0155 * dot_angl_1;
+    fingJoints.vel.y = 0.8 * dot_angl_2_old + 0.0155 * dot_angl_2;
+    fingJoints.vel.z = 0.8 * dot_angl_3_old + 0.0155 * dot_angl_3;
 
     dDot_angl_1 = (fingJoints.vel.x - dot_angl_1_old) / timeChange;
     dDot_angl_2 = (fingJoints.vel.y - dot_angl_2_old) / timeChange;
     dDot_angl_3 = (fingJoints.vel.z - dot_angl_3_old) / timeChange;
 
-    fingJoints.acc.x = 0.8*dDot_angl_1_old + 0.0155*dDot_angl_1;
-    fingJoints.acc.y = 0.8*dDot_angl_2_old + 0.0155*dDot_angl_2;
-    fingJoints.acc.z = 0.8*dDot_angl_3_old + 0.0155*dDot_angl_3;
+    fingJoints.acc.x = 0.8 * dDot_angl_1_old + 0.0155 * dDot_angl_1;
+    fingJoints.acc.y = 0.8 * dDot_angl_2_old + 0.0155 * dDot_angl_2;
+    fingJoints.acc.z = 0.8 * dDot_angl_3_old + 0.0155 * dDot_angl_3;
+
+  velAcc1.pVel = velAcc1.pVel + vel_1_old;
+  velAcc2.pVel = velAcc2.pVel + vel_1_old;
+  velAcc3.pVel = velAcc3.pVel + vel_1_old;
+  velAcc6.pVel = velAcc6.pVel + vel_1_old;
 
     duration = millis();
 
@@ -876,83 +888,83 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     }
 
     //print data/write data to SD card
-/*
-    File dataFile = SD.open("datalog2.txt", FILE_WRITE);  // open the file.
-    if (dataFile) {
+    /*
+        File dataFile = SD.open("datalog2.txt", FILE_WRITE);  // open the file.
+        if (dataFile) {
 
-      dataFile.print(accel1.acceleration.x); dataFile.print(",");
-      dataFile.print(accel1.acceleration.y); dataFile.print(",");
-      dataFile.print(accel1.acceleration.z); dataFile.print(",");
+          dataFile.print(accel1.acceleration.x); dataFile.print(",");
+          dataFile.print(accel1.acceleration.y); dataFile.print(",");
+          dataFile.print(accel1.acceleration.z); dataFile.print(",");
 
-      dataFile.print(accel2.acceleration.x); dataFile.print(",");
-      dataFile.print(accel2.acceleration.y); dataFile.print(",");
-      dataFile.print(accel2.acceleration.z); dataFile.print(",");
+          dataFile.print(accel2.acceleration.x); dataFile.print(",");
+          dataFile.print(accel2.acceleration.y); dataFile.print(",");
+          dataFile.print(accel2.acceleration.z); dataFile.print(",");
 
-      dataFile.print(accel3.acceleration.x); dataFile.print(",");
-      dataFile.print(accel3.acceleration.y); dataFile.print(",");
-      dataFile.print(accel3.acceleration.z); dataFile.print(",");
+          dataFile.print(accel3.acceleration.x); dataFile.print(",");
+          dataFile.print(accel3.acceleration.y); dataFile.print(",");
+          dataFile.print(accel3.acceleration.z); dataFile.print(",");
 
-      dataFile.print(accel6.acceleration.x); dataFile.print(",");
-      dataFile.print(accel6.acceleration.y); dataFile.print(",");
-      dataFile.print(accel6.acceleration.z); dataFile.print(",");
+          dataFile.print(accel6.acceleration.x); dataFile.print(",");
+          dataFile.print(accel6.acceleration.y); dataFile.print(",");
+          dataFile.print(accel6.acceleration.z); dataFile.print(",");
 
-      dataFile.print(gyro1.gyro.x); dataFile.print(",");
-      dataFile.print(gyro1.gyro.y); dataFile.print(",");
-      dataFile.print(gyro1.gyro.z); dataFile.print(",");
+          dataFile.print(gyro1.gyro.x); dataFile.print(",");
+          dataFile.print(gyro1.gyro.y); dataFile.print(",");
+          dataFile.print(gyro1.gyro.z); dataFile.print(",");
 
-      dataFile.print(gyro2.gyro.x); dataFile.print(",");
-      dataFile.print(gyro2.gyro.y); dataFile.print(",");
-      dataFile.print(gyro2.gyro.z); dataFile.print(",");
+          dataFile.print(gyro2.gyro.x); dataFile.print(",");
+          dataFile.print(gyro2.gyro.y); dataFile.print(",");
+          dataFile.print(gyro2.gyro.z); dataFile.print(",");
 
-      dataFile.print(gyro3.gyro.x); dataFile.print(",");
-      dataFile.print(gyro3.gyro.y); dataFile.print(",");
-      dataFile.print(gyro3.gyro.z); dataFile.print(",");
+          dataFile.print(gyro3.gyro.x); dataFile.print(",");
+          dataFile.print(gyro3.gyro.y); dataFile.print(",");
+          dataFile.print(gyro3.gyro.z); dataFile.print(",");
 
-      dataFile.print(gyro6.gyro.x); dataFile.print(",");
-      dataFile.print(gyro6.gyro.y); dataFile.print(",");
-      dataFile.print(gyro6.gyro.z); dataFile.print(",");
+          dataFile.print(gyro6.gyro.x); dataFile.print(",");
+          dataFile.print(gyro6.gyro.y); dataFile.print(",");
+          dataFile.print(gyro6.gyro.z); dataFile.print(",");
 
-      dataFile.print(anglesNew1.aX, 3); dataFile.print(",");
-      dataFile.print(anglesNew2.aX, 3); dataFile.print(",");
-      dataFile.print(anglesNew3.aX, 3); dataFile.print(",");
-      dataFile.print(anglesNew6.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew1.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew2.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew3.aX, 3); dataFile.print(",");
+          dataFile.print(anglesNew6.aX, 3); dataFile.print(",");
 
-      dataFile.print(ticks.m3); dataFile.print(",");
-      dataFile.print(rots.m3); dataFile.print(",");
-      dataFile.print(ticks.m4); dataFile.print(",");
-      dataFile.print(rots.m4); dataFile.print(",");
+          dataFile.print(ticks.m3); dataFile.print(",");
+          dataFile.print(rots.m3); dataFile.print(",");
+          dataFile.print(ticks.m4); dataFile.print(",");
+          dataFile.print(rots.m4); dataFile.print(",");
 
-      dataFile.print(sensorData.amps3); dataFile.print(",");
-      dataFile.print(sensorData.amps4); dataFile.print(",");
-      dataFile.print(sensorData.scp1); dataFile.print(",");
+          dataFile.print(sensorData.amps3); dataFile.print(",");
+          dataFile.print(sensorData.amps4); dataFile.print(",");
+          dataFile.print(sensorData.scp1); dataFile.print(",");
 
-      dataFile.print(duration * 1e-3, 3); dataFile.print(",");
+          dataFile.print(duration * 1e-3, 3); dataFile.print(",");
 
-      dataFile.print(theta_0); dataFile.print(",");
-      dataFile.print(theta_1); dataFile.print(",");
-      dataFile.print(theta_2); dataFile.print(",");
-      dataFile.print(theta_3); dataFile.print(",");
+          dataFile.print(theta_0); dataFile.print(",");
+          dataFile.print(theta_1); dataFile.print(",");
+          dataFile.print(theta_2); dataFile.print(",");
+          dataFile.print(theta_3); dataFile.print(",");
 
-      dataFile.print(theta_0f); dataFile.print(",");
-      dataFile.print(theta_1f); dataFile.print(",");
-      dataFile.print(theta_2f); dataFile.print(",");
-      dataFile.print(theta_3f); dataFile.print(",");
+          dataFile.print(theta_0f); dataFile.print(",");
+          dataFile.print(theta_1f); dataFile.print(",");
+          dataFile.print(theta_2f); dataFile.print(",");
+          dataFile.print(theta_3f); dataFile.print(",");
 
-      dataFile.print(fingJoints.pos.x); dataFile.print(",");
-      dataFile.print(fingJoints.pos.y); dataFile.print(",");
-      dataFile.print(fingJoints.pos.z); dataFile.print(",");
+          dataFile.print(fingJoints.pos.x); dataFile.print(",");
+          dataFile.print(fingJoints.pos.y); dataFile.print(",");
+          dataFile.print(fingJoints.pos.z); dataFile.print(",");
 
-      dataFile.print(fingJoints.vel.x); dataFile.print(",");
-      dataFile.print(fingJoints.vel.y); dataFile.print(",");
-      dataFile.print(fingJoints.vel.z); dataFile.print(",");
+          dataFile.print(fingJoints.vel.x); dataFile.print(",");
+          dataFile.print(fingJoints.vel.y); dataFile.print(",");
+          dataFile.print(fingJoints.vel.z); dataFile.print(",");
 
-      dataFile.print(fingJoints.acc.x); dataFile.print(",");
-      dataFile.print(fingJoints.acc.y); dataFile.print(",");
-      dataFile.print(fingJoints.acc.z); dataFile.print(",");
+          dataFile.print(fingJoints.acc.x); dataFile.print(",");
+          dataFile.print(fingJoints.acc.y); dataFile.print(",");
+          dataFile.print(fingJoints.acc.z); dataFile.print(",");
 
-      dataFile.println();
-      dataFile.close();
-    }
+          dataFile.println();
+          dataFile.close();
+        }
     */
 
     Serial.print(accel1.acceleration.x); Serial.print(",");
@@ -993,10 +1005,10 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     Serial.print(anglesNew6.aX, 3); Serial.print(",");
 
     Serial.print(ticks.m3); Serial.print(",");
-    Serial.print(rots.m3); Serial.print(",");
+    Serial.print(rots.m3); Serial.print(",");//flexion
     Serial.print(ticks.m4); Serial.print(",");
-    Serial.print(rots.m4); Serial.print(","); 
- 
+    Serial.print(rots.m4); Serial.print(",");//extension
+
     Serial.print(sensorData.amps3); Serial.print(",");
     Serial.print(sensorData.amps4); Serial.print(",");
     Serial.print(sensorData.scp1); Serial.print(",");
@@ -1013,7 +1025,7 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     Serial.print(theta_2f); Serial.print(",");
     Serial.print(theta_3f); Serial.print(",");
 
-    Serial.print(fingJoints.pos.x); Serial.print(","); //41
+    Serial.print(fingJoints.pos.x); Serial.print(","); //45
     Serial.print(fingJoints.pos.y); Serial.print(",");
     Serial.print(fingJoints.pos.z); Serial.print(",");
 
@@ -1022,23 +1034,36 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[], int MJ_BIN
     Serial.print(fingJoints.vel.z); Serial.print(",");
 
     Serial.print(fingJoints.acc.x); Serial.print(",");
-    Serial.print(fingJoints.acc.y); Serial.print(","); //remove comma and timeChange after debugging
-    Serial.print(fingJoints.acc.z); Serial.print(",");
-    Serial.print(timeChange);
+    Serial.print(fingJoints.acc.y); Serial.print(",");
+    Serial.print(fingJoints.acc.z); Serial.print(","); //53
 
-    Serial.println(); 
-   /*
-        Serial.print(ticks.m3); Serial.print(",");
-        Serial.print(rots.m3); Serial.print(",");
-        Serial.print(ticks.m4); Serial.print(",");
-        Serial.print(rots.m4); Serial.print(",");
-        Serial.print(err_m1); Serial.print(",");
-        Serial.print(err_m2); Serial.print(",");
-        Serial.print(Err_m); Serial.print(",");
-        Serial.print(targetTicks / (12 * 30)); Serial.print(",");
-        Serial.print(duration * 1e-3, 3);
-        Serial.println(); */
+    Serial.print(velAcc1.pVel); Serial.print(",");
+    Serial.print(velAcc1.pAcc); Serial.print(",");
+
+    Serial.print(velAcc2.pVel); Serial.print(",");
+    Serial.print(velAcc2.pAcc); Serial.print(",");
+
+    Serial.print(velAcc3.pVel); Serial.print(",");
+    Serial.print(velAcc3.pAcc); Serial.print(",");
+
+    Serial.print(velAcc6.pVel); Serial.print(",");
+    Serial.print(velAcc6.pAcc);
+
+    Serial.println();
     
+    /*
+   
+         Serial.print(ticks.m3); Serial.print(",");
+         Serial.print(rots.m3); Serial.print(",");
+         Serial.print(ticks.m4); Serial.print(",");
+         Serial.print(rots.m4); Serial.print(",");
+         Serial.print(err_m1); Serial.print(",");
+         Serial.print(err_m2); Serial.print(",");
+         Serial.print(Err_m); Serial.print(",");
+         Serial.print(targetTicks / (12 * 30)); Serial.print(",");
+         Serial.print(duration * 1e-3, 3);
+         Serial.println(); */
+
   }
 
   //reached desired position, so stop
@@ -1130,15 +1155,33 @@ void forceControlPD(FsrScpData_t& sensData, float target_force, int MJ_BIN1[],
   }
 }
 
-void computeFingerAngleCF(sensors_event_t& acc, sensors_event_t& gyr, AnglesComps_t& anglesHist, AnglesComps_t& BiasIMU) {
+void computeFingerAngleCF(sensors_event_t& acc, sensors_event_t& gyr, AnglesComps_t& anglesHist, AnglesDerivatives_t& velAcc, AnglesComps_t& BiasIMU) {
   float RADIANS_TO_DEGREES = 180 / 3.14159;
   float dt = anglesHist.d_time;
 
-  //sgn(acc.acceleration.y) *,
+  float aY_angle = atan2(1 * acc.acceleration.x, sgn(acc.acceleration.z) *
+                         sqrt(pow(acc.acceleration.y, 2) + pow(acc.acceleration.z, 2))) * RADIANS_TO_DEGREES; //roll
+  float aX_angle = atan2(acc.acceleration.y, sgn(acc.acceleration.z) *
+                         sqrt(pow(acc.acceleration.x, 2) + pow(acc.acceleration.z, 2))) * RADIANS_TO_DEGREES; //pitch
+  float aZ_angle = atan2(sqrt(pow(acc.acceleration.x, 2) +
+                              pow(acc.acceleration.y, 2)), acc.acceleration.z) * RADIANS_TO_DEGREES; //yaw
 
-  float aY_angle = atan2(1 * acc.acceleration.x, sgn(acc.acceleration.z) * sqrt(pow(acc.acceleration.y, 2) + pow(acc.acceleration.z, 2))) * RADIANS_TO_DEGREES; //roll
-  float aX_angle = atan2(acc.acceleration.y, sgn(acc.acceleration.z) * sqrt(pow(acc.acceleration.x, 2) + pow(acc.acceleration.z, 2))) * RADIANS_TO_DEGREES; //pitch
-  float aZ_angle = atan2(sqrt(pow(acc.acceleration.x, 2) + pow(acc.acceleration.y, 2)), acc.acceleration.z ) * RADIANS_TO_DEGREES; //yaw
+  // Calculate Euler accelerations
+  velAcc.rAcc = (gyr.gyro.x - BiasIMU.gX) + (acc.acceleration.y) * tan(aX_angle / DEG_TO_RAD) +
+                (acc.acceleration.z) * tan(aY_angle / DEG_TO_RAD) * cos(aX_angle / DEG_TO_RAD);
+  velAcc.pAcc = (gyr.gyro.y - BiasIMU.gY) - (acc.acceleration.x) * tan(aX_angle / DEG_TO_RAD);
+  velAcc.yAcc = (gyr.gyro.z - BiasIMU.gZ) + (acc.acceleration.z) * tan(aY_angle / DEG_TO_RAD);
+
+  // Calculate Euler velocities
+  velAcc.rVel = velAcc.rAcc * dt;
+  velAcc.pVel =  velAcc.pAcc * dt;
+  velAcc.yVel =  velAcc.yAcc * dt;
+
+  /*
+    float rollVel = rollVel + rollAccel * dt;
+    float pitchVel = pitchVel + pitchAccel * dt;
+    float yawVel = yawVel + yawAccel * dt;
+  */
 
   // Compute the (filtered) gyro angles
   //float dt = microsPerReading;
@@ -1202,7 +1245,7 @@ void butControlRVS(int pinNum) {
 }
 
 void computedTorqueController (double state_pos[3], double state_vel[3], double torque,
-                               state_t& theta_d, float currTime, trq_t tau_comp,
+                               state_t& theta_d, float currTime, trq_t& tau_comp,
                                double M[9], double C[9], double B[9], double G[3]) {
 
   /*
@@ -1309,8 +1352,6 @@ void computedTorqueController (double state_pos[3], double state_vel[3], double 
   tau_comp.tau_1 = tau_c[0][1];
   tau_comp.tau_2 = tau_c[1][1];
   tau_comp.tau_3 = tau_c[2][1];
-
-
 
   /*
      note that joints cannot generate infinitely large torques or forces. Need to set a torque_limit
