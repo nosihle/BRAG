@@ -39,22 +39,22 @@ long int goalTicks = goalRots * gr * cpr; // GR = 15;
 
 //---------------------------------------------------------------------
 //Define motor direction control pins
- int MJ1_BIN1 = 0, MJ1_BIN2 = 1, MJ2_BIN1 = 22, MJ2_BIN2 = 23;
- int MJ3_BIN1 = 33, MJ3_BIN2 = 12, MJ4_BIN1 = 36, MJ4_BIN2 = 37;
- int MJ5_BIN1 = 24, MJ5_BIN2 = 25, MJ6_BIN1 = 28, MJ6_BIN2 = 29;
- int MJ_BIN[] = {MJ1_BIN1, MJ1_BIN2, MJ2_BIN1, MJ2_BIN2, MJ3_BIN1, MJ3_BIN2,
-                      MJ4_BIN1, MJ4_BIN2, MJ5_BIN1, MJ5_BIN2, MJ6_BIN1, MJ6_BIN2
-                     }; //All motor pins
+int MJ1_BIN1 = 0, MJ1_BIN2 = 1, MJ2_BIN1 = 22, MJ2_BIN2 = 23;
+int MJ3_BIN1 = 33, MJ3_BIN2 = 12, MJ4_BIN1 = 36, MJ4_BIN2 = 37;
+int MJ5_BIN1 = 24, MJ5_BIN2 = 25, MJ6_BIN1 = 28, MJ6_BIN2 = 29;
+int MJ_BIN[] = {MJ1_BIN1, MJ1_BIN2, MJ2_BIN1, MJ2_BIN2, MJ3_BIN1, MJ3_BIN2,
+                MJ4_BIN1, MJ4_BIN2, MJ5_BIN1, MJ5_BIN2, MJ6_BIN1, MJ6_BIN2
+               }; //All motor pins
 //define motors individually, easier for control implementation
- int m_FNT1[] = {MJ_BIN[0], MJ_BIN[1]}, m_FNT2[] = {MJ_BIN[2], MJ_BIN[3]};
- int m_FNT3[] = {MJ_BIN[4], MJ_BIN[5]}, m_FNT4[] = {MJ_BIN[6], MJ_BIN[7]};
- int m_BCK1[] = {MJ_BIN[8], MJ_BIN[9]}, m_BCK2[] = {MJ_BIN[10], MJ_BIN[11]};
+int m_FNT1[] = {MJ_BIN[0], MJ_BIN[1]}, m_FNT2[] = {MJ_BIN[2], MJ_BIN[3]};
+int m_FNT3[] = {MJ_BIN[4], MJ_BIN[5]}, m_FNT4[] = {MJ_BIN[6], MJ_BIN[7]};
+int m_BCK1[] = {MJ_BIN[8], MJ_BIN[9]}, m_BCK2[] = {MJ_BIN[10], MJ_BIN[11]};
 
 //---------------------------------------------------------------------
 //Define encoder a and b state pins
- int MJ1_EN_A = 2, MJ1_EN_B = 3, MJ2_EN_A = 5, MJ2_EN_B = 4;
- int MJ3_EN_A = 6, MJ3_EN_B = 7, MJ4_EN_A = 8, MJ4_EN_B = 9;
- int MJ5_EN_A = 10, MJ5_EN_B = 11, MJ6_EN_A = 16, MJ6_EN_B = 17;
+int MJ1_EN_A = 2, MJ1_EN_B = 3, MJ2_EN_A = 5, MJ2_EN_B = 4;
+int MJ3_EN_A = 6, MJ3_EN_B = 7, MJ4_EN_A = 8, MJ4_EN_B = 9;
+int MJ5_EN_A = 10, MJ5_EN_B = 11, MJ6_EN_A = 16, MJ6_EN_B = 17;
 
 //---------------------------------------------------------------------
 //Create 6 encoder objects for the six motors
@@ -70,12 +70,19 @@ int COUNTER = 0;
 FsrScpData_t sensorData;
 state_t fingState;
 
+double L_1 = 38.88 / 1000; //m
+double L_2 = 25.85 / 1000;
+double L_3 = 31.84 / 1000;
+
 //initialize for kinematics and dynamics
 double M[9], C[9], B[9], G[3], finger[9];
-double state_pos[3] = {.1, 1, 2};
-double fin_length[3] = {3, 4, 5};
+double state_pos[3] = {0.0, 0.0, 0.0}; // Initial position
+double state_vel[3] = {0.0, 0.0, 0.0};
+double fin_length[3] = {L_1, L_2, L_3};
 
 state_t desired_state;
+state_t theta_d;
+trq_t tau_comp;
 
 //IMU needs
 Adafruit_LSM6DS33 lsm6ds33;
@@ -262,9 +269,28 @@ void setup(void) {
 
   t_dur = millis(); t_now = millis();
 
+  //initialize control variables
+  polyCoef_t Coeff;
+  float PosInit = 0.0;
+  float PosFinal = 1.5;//cm
+  float VelInit = 0.0;
+  float VelFinal = 0.0;
+  unsigned t_init = millis();
+  float duration = 10; //seconds
+  unsigned t_final = t_init + duration * 1000;
+
+  //call function generator of choice, using cubic function for now, to compute coefficients
+  CubicTrajCoeff (Coeff, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
+
+  //Update/compute desired_theta from desired_state
+  computeDesiredStates (theta_d, desired_state, Coeff, millis());
+  computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G);
+
   // control
   trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
   trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
+
+
 
 }
 
@@ -804,10 +830,10 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     dDot_angl_2_old = fingJoints.acc.y;
     dDot_angl_3_old = fingJoints.acc.z;
 
-     vel_1_old = velAcc1.pVel; 
-     vel_2_old = velAcc2.pVel; 
-     vel_3_old = velAcc3.pVel; 
-     vel_4_old = velAcc6.pVel;
+    vel_1_old = velAcc1.pVel;
+    vel_2_old = velAcc2.pVel;
+    vel_3_old = velAcc3.pVel;
+    vel_4_old = velAcc6.pVel;
 
     // read sensor data
     readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
@@ -852,10 +878,10 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     fingJoints.acc.y = 0.8 * dDot_angl_2_old + 0.0155 * dDot_angl_2;
     fingJoints.acc.z = 0.8 * dDot_angl_3_old + 0.0155 * dDot_angl_3;
 
-  velAcc1.pVel = velAcc1.pVel + vel_1_old;
-  velAcc2.pVel = velAcc2.pVel + vel_1_old;
-  velAcc3.pVel = velAcc3.pVel + vel_1_old;
-  velAcc6.pVel = velAcc6.pVel + vel_1_old;
+    velAcc1.pVel = velAcc1.pVel + vel_1_old;
+    velAcc2.pVel = velAcc2.pVel + vel_1_old;
+    velAcc3.pVel = velAcc3.pVel + vel_1_old;
+    velAcc6.pVel = velAcc6.pVel + vel_1_old;
 
     duration = millis();
 
@@ -1050,9 +1076,9 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     Serial.print(velAcc6.pAcc);
 
     Serial.println();
-    
+
     /*
-   
+
          Serial.print(ticks.m3); Serial.print(",");
          Serial.print(rots.m3); Serial.print(",");
          Serial.print(ticks.m4); Serial.print(",");
@@ -1244,8 +1270,7 @@ void butControlRVS(int pinNum) {
   }
 }
 
-void computedTorqueController (double state_pos[3], double state_vel[3], double torque,
-                               state_t& theta_d, float currTime, trq_t& tau_comp,
+void computedTorqueController (double state_pos[3], double state_vel[3], state_t& theta_d, trq_t& tau_comp,
                                double M[9], double C[9], double B[9], double G[3]) {
 
   /*
@@ -1256,7 +1281,7 @@ void computedTorqueController (double state_pos[3], double state_vel[3], double 
      Can be re-inialized here if they are to be defined as local variables.
   */
 
-  dynamics(state_pos, fin_length, M, C, B, G); //update M,C,B,G given state_pos and fin_length
+  dynamics(state_pos, M, C, B, G); //update M,C,B,G given state_pos and fin_length
 
   //create appropriate dimensions for matrices
 
@@ -1353,6 +1378,48 @@ void computedTorqueController (double state_pos[3], double state_vel[3], double 
   tau_comp.tau_2 = tau_c[1][1];
   tau_comp.tau_3 = tau_c[2][1];
 
+  tmm::Scalar pinv_H_tr_1[1][3] = { //pinverse of transpose of H
+    {0.3875, -0.2738, 0.0794}
+  };
+  tmm::Matrix<1, 3> pinv_H_tr(pinv_H_tr_1);
+
+  tmm::Matrix<1, 1> control = pinv_H_tr * tau_c;
+
+  double control_cmd = control[0][1];
+
+    // normalize to PWM using tanh
+    double vel_PD = tanh(control_cmd) * 255;
+    /*
+    if (abs(vel_PD) < 50) { //minimum PWM to overcome friction
+      vel_PD  = 50;
+    }
+*/
+
+      if (abs(Err_m) > ER_MARGIN) { //may have overshot target
+        if (sgn(Err_m) > 0) { //err was increasing, hence overshot, reverse
+          FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+        else {//err was negative, continue
+          RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+      }
+
+      if (abs(Err_m) < ER_MARGIN) { //may not have reached target
+        if (sgn(Err_m) > 0) { // err was positive, increasing -- continue
+          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+        else { //err was negative reverse
+          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        }
+      }
+
+    
+
+
   /*
      note that joints cannot generate infinitely large torques or forces. Need to set a torque_limit
   */
@@ -1372,5 +1439,47 @@ void computeJointAngles(jntAngl_t& JointAngles, AnglesComps_t& Angle1, AnglesCom
   JointAngles.theta_1 = theta_2 - theta_1;
   JointAngles.theta_2 = theta_3 - theta_2;
   JointAngles.theta_3 = theta_4 - theta_3;
+
+}
+
+void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_t& Coeff, unsigned currTime) {
+
+  tmm::Scalar pinv_H_1[3][1] = {
+    {0.3875},
+    { -0.2738},
+    {0.0794}
+  };
+  tmm::Matrix<3, 1> pinv_H(pinv_H_1);
+
+  tmm::Scalar H_1[1][3] = {
+    {1.6744, -1.1830, 0.3433}
+  };
+  tmm::Matrix<1, 3> H(H_1);
+
+  //compute desired state using the computed coefficients
+  CubicTraj (des_state, Coeff, currTime);
+
+  tmm::Matrix<3, 1> theta_i = pinv_H * des_state.pos.x;
+  tmm::Matrix<3, 1> dottheta_i = pinv_H * des_state.vel.x;
+
+  desired_theta.pos.x = theta_i[0][1];
+  desired_theta.pos.y = theta_i[1][1];
+  desired_theta.pos.z = theta_i[2][1];
+
+  desired_theta.vel.x = dottheta_i[0][1];
+  desired_theta.vel.y = dottheta_i[1][1];
+  desired_theta.vel.z = dottheta_i[2][1];
+
+  desired_theta.acc.x = 0.0;
+  desired_theta.acc.y = 0.0;
+  desired_theta.acc.z = 0.0;
+
+
+  /*
+    SineTraj(state_t& des_state, unsigned currTime);
+    QuinticTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float PosInit,
+                      float PosFinal, float VelInit, float VelFinal, float AccInit, float AccFinal);
+    QuinticTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t);
+  */
 
 }
