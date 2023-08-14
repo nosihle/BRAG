@@ -28,7 +28,7 @@
 //                double G[3]
 // Return Type  : void
 //
-void dynamics(double state_pos[3], double fin_length[3], double M[9],
+void dynamics(double state_pos[3], double M[9],
               double C[9], double B[9], double G[3])
 {
   /*
