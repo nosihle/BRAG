@@ -225,8 +225,23 @@ float Voltage2Force(int forceBits) {
 
 void SineTraj(state_t& des_state, unsigned currTime) {
   /*
-     generates signals for sinusiadal position, velocity and acceleration
+     generates signals for sinusiadal position, velocity and acceleration of the 
+     tendon lengths, hence only 1D
   */
+  
+  des_state.pos.x = sin(currTime);
+  des_state.pos.y = 0;
+  des_state.pos.z = 0;
+
+  des_state.vel.x = cos(currTime);
+  des_state.vel.y = 0;
+  des_state.vel.z = 0;
+
+  des_state.acc.x = -1 * sin(currTime);
+  des_state.acc.y = 0;
+  des_state.acc.z = 0;
+  
+/*
   des_state.pos.x = sin(currTime);
   des_state.pos.y = -1 * cos(currTime);
   des_state.pos.z = sin(currTime);
@@ -238,6 +253,7 @@ void SineTraj(state_t& des_state, unsigned currTime) {
   des_state.acc.x = -1 * sin(currTime);
   des_state.acc.y = cos(currTime);
   des_state.acc.z = -1 * sin(currTime);
+  */
 }
 
 void CubicTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float PosInit,
@@ -259,7 +275,7 @@ void QuinticTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, flo
                        float PosFinal, float VelInit, float VelFinal, float AccInit, float AccFinal) {
   /*
      Generates the constants to fit in a quintic polynomial when the initial
-     positon, velocity and acceleration together with final position, velocity and accelerations
+     position, velocity and acceleration together with final position, velocity and accelerations
      are specified.
   */
   unsigned T = t_final - t_init;
