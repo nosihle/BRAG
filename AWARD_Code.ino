@@ -250,7 +250,6 @@ void setup(void) {
   BiasIMU6.aX = -1.28;  BiasIMU6.aY = -3.67;  BiasIMU6.aZ = -7.85;
   BiasIMU6.gX = 0.31; BiasIMU6.gY = -0.30;  BiasIMU6.gZ = -0.27;
 
-
   //initialize SD card
   if (!SD.begin(chipSelect)) {
     Serial.println("Card failed, or not present");
@@ -270,25 +269,138 @@ void setup(void) {
   t_dur = millis(); t_now = millis();
 
   //initialize control variables
-  polyCoef_t Coeff;
+  polyCoef_t COEFF;
   float PosInit = 0.0;
-  float PosFinal = 1.5;//cm
+  float PosFinal = 8.8;//cm
   float VelInit = 0.0;
   float VelFinal = 0.0;
   unsigned t_init = millis();
   float duration = 10; //seconds
   unsigned t_final = t_init + duration * 1000;
-
+  unsigned currTime, endTime;
   //call function generator of choice, using cubic function for now, to compute coefficients
-  CubicTrajCoeff (Coeff, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
+  CubicTrajCoeff (COEFF, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
+  /*
+    Serial.print(COEFF.a0); Serial.print(",");
+    Serial.print(COEFF.a1); Serial.print(",");
+    Serial.print(COEFF.a2, 5); Serial.print(",");
+    Serial.print(COEFF.a3,8); Serial.print(",");
+    Serial.print(COEFF.a4); Serial.print(",");
+    Serial.print(COEFF.a5); Serial.print(",");
+  */
 
-  //Update/compute desired_theta from desired_state
-  computeDesiredStates (theta_d, desired_state, Coeff, millis());
-  computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G);
+  //repeat this for a set number of iterations
+  // initialize position, velocity and acceleration
+  float theta_0 = 0.0f; float theta_1 = 0.0f;
+  float theta_2 = 0.0f; float theta_3 = 0.0f;
 
+  //initialize filtered angles
+  float theta_0f = 0.0f; float theta_1f = 0.0f;
+  float theta_2f = 0.0f; float theta_3f = 0.0f;
+
+  float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
+  float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
+
+  float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
+  float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
+  float vel_1_old = 0.0f; float vel_2_old = 0.0f; float vel_3_old = 0.0f; float vel_4_old = 0.0f;
+
+  float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
+  float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
+  unsigned long nowTime;
+  double timeChange;
+
+  for (int count = 0; count < 10; count++) {
+    //Update/compute desired_theta from desired_state
+    currTime = micros();
+    computeDesiredStates (theta_d, desired_state, COEFF, currTime);
+
+    //update state_pos, state_vel
+
+    //keep data from previous set. Only care about angles
+    angl_1_old = fingState.pos.x;
+    angl_2_old = fingState.pos.y;
+    angl_3_old = fingState.pos.z;
+
+    dot_angl_1_old = fingState.vel.x;
+    dot_angl_2_old = fingState.vel.y;
+    dot_angl_3_old = fingState.vel.z;
+
+    dDot_angl_1_old = fingState.acc.x;
+    dDot_angl_2_old = fingState.acc.y;
+    dDot_angl_3_old = fingState.acc.z;
+
+    vel_1_old = velAcc1.pVel;
+    vel_2_old = velAcc2.pVel;
+    vel_3_old = velAcc3.pVel;
+    vel_4_old = velAcc6.pVel;
+
+    // read sensor data
+    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+
+    //compute angles using updated sensor info
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
+
+    //get needed angles and compute derivatives
+    theta_0 = anglesNew1.aX + 180;
+    theta_1 = anglesNew2.aX + 180;
+    theta_2 = anglesNew3.aX + 180;
+    theta_3 = anglesNew6.aX + 180;
+
+    //compute joint angles
+    fingState.pos.x = theta_1 - theta_0;
+    fingState.pos.y = theta_2 - theta_1;
+    fingState.pos.z = theta_3 - theta_2;
+
+    state_pos[0] = fingState.pos.x;
+    state_pos[1] = fingState.pos.y;
+    state_pos[2] = fingState.pos.z;
+
+
+    endTime = micros();
+    timeChange = (endTime - currTime) * 1e-6;// dt is in seconds
+
+    dot_angl_1 = (fingState.pos.x - angl_1_old) / timeChange;
+    dot_angl_2 = (fingState.pos.y - angl_2_old) / timeChange;
+    dot_angl_3 = (fingState.pos.z - angl_3_old) / timeChange;
+
+    fingState.vel.x = 0.8 * dot_angl_1_old + 0.0155 * dot_angl_1;
+    fingState.vel.y = 0.8 * dot_angl_2_old + 0.0155 * dot_angl_2;
+    fingState.vel.z = 0.8 * dot_angl_3_old + 0.0155 * dot_angl_3;
+
+    state_vel[0] = fingState.vel.x;
+    state_vel[1] = fingState.vel.y;
+    state_vel[2] = fingState.vel.z;
+
+    dDot_angl_1 = (fingState.vel.x - dot_angl_1_old) / timeChange;
+    dDot_angl_2 = (fingState.vel.y - dot_angl_2_old) / timeChange;
+    dDot_angl_3 = (fingState.vel.z - dot_angl_3_old) / timeChange;
+
+    fingState.acc.x = 0.8 * dDot_angl_1_old + 0.0155 * dDot_angl_1;
+    fingState.acc.y = 0.8 * dDot_angl_2_old + 0.0155 * dDot_angl_2;
+    fingState.acc.z = 0.8 * dDot_angl_3_old + 0.0155 * dDot_angl_3;
+
+    velAcc1.pVel = velAcc1.pVel + vel_1_old;
+    velAcc2.pVel = velAcc2.pVel + vel_1_old;
+    velAcc3.pVel = velAcc3.pVel + vel_1_old;
+    velAcc6.pVel = velAcc6.pVel + vel_1_old;
+
+    computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G, m_FNT3, m_FNT4);
+    //Serial.print(currTime * 1e-6); Serial.println();
+
+  }
+  //reached desired position, so stop
+  STOP_Motors(m_FNT3);
+  STOP_Motors(m_FNT4);
   // control
-  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
-  trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
+  //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
+  //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
 
 
 
@@ -1078,7 +1190,6 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     Serial.println();
 
     /*
-
          Serial.print(ticks.m3); Serial.print(",");
          Serial.print(rots.m3); Serial.print(",");
          Serial.print(ticks.m4); Serial.print(",");
@@ -1088,7 +1199,8 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
          Serial.print(Err_m); Serial.print(",");
          Serial.print(targetTicks / (12 * 30)); Serial.print(",");
          Serial.print(duration * 1e-3, 3);
-         Serial.println(); */
+         Serial.println();
+    */
 
   }
 
@@ -1271,7 +1383,7 @@ void butControlRVS(int pinNum) {
 }
 
 void computedTorqueController (double state_pos[3], double state_vel[3], state_t& theta_d, trq_t& tau_comp,
-                               double M[9], double C[9], double B[9], double G[3]) {
+                               double M[9], double C[9], double B[9], double G[3], int MJ_BIN_m1[2], int MJ_BIN_m2[2]) {
 
   /*
      state_pos is the current joint angles of the fingers. specifically [JointAngles.theta_1, JointAngles.theta_2, JointAngles.theta_3];
@@ -1323,9 +1435,9 @@ void computedTorqueController (double state_pos[3], double state_vel[3], state_t
 
   //------------------------------------//
   const tmm::Scalar K_p[3][3] = {
-    {55, 0, 0},
-    {0, 55, 0},
-    {0, 0, 55}
+    {75, 0, 0},
+    {0, 75, 0},
+    {0, 0, 75}
   };
   tmm::SquareMatrix<3> Kp(K_p);
 
@@ -1368,15 +1480,15 @@ void computedTorqueController (double state_pos[3], double state_vel[3], state_t
 
   tmm::Matrix<3, 1> acc_des(acc_des_1);
 
-  //  float u = -1 * Kv * err_dot - Kp * err;
+  //float u = -1 * Kv * err_dot - Kp * err;
 
   tmm::Matrix<3, 1> U = Kv * -1 * err_dot - Kp * err;
 
   tmm::Matrix<3, 1> tau_c = M_m * (acc_des - U) + G_m;
 
-  tau_comp.tau_1 = tau_c[0][1];
-  tau_comp.tau_2 = tau_c[1][1];
-  tau_comp.tau_3 = tau_c[2][1];
+  tau_comp.tau_1 = tau_c[0][0];
+  tau_comp.tau_2 = tau_c[1][0];
+  tau_comp.tau_3 = tau_c[2][0];
 
   tmm::Scalar pinv_H_tr_1[1][3] = { //pinverse of transpose of H
     {0.3875, -0.2738, 0.0794}
@@ -1385,44 +1497,61 @@ void computedTorqueController (double state_pos[3], double state_vel[3], state_t
 
   tmm::Matrix<1, 1> control = pinv_H_tr * tau_c;
 
-  double control_cmd = control[0][1];
+  double control_cmd = control[0][0];
 
-    // normalize to PWM using tanh
-    double vel_PD = tanh(control_cmd) * 255;
-    /*
+  //normalize to PWM using tanh
+  double torque_cmd = tanh(control_cmd) * 255;
+  /*
     if (abs(vel_PD) < 50) { //minimum PWM to overcome friction
-      vel_PD  = 50;
+    vel_PD  = 50;
     }
-*/
+  */
 
-      if (abs(Err_m) > ER_MARGIN) { //may have overshot target
-        if (sgn(Err_m) > 0) { //err was increasing, hence overshot, reverse
-          FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
-        }
-        else {//err was negative, continue
-          RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
-        }
-      }
+  if (torque_cmd > ER_MARGIN) { //may have overshot target
+    FWD_Motors(MJ_BIN_m2, abs(torque_cmd)); //motors move opposite each other
+    RVS_Motors(MJ_BIN_m1, abs(torque_cmd));
+  }
 
-      if (abs(Err_m) < ER_MARGIN) { //may not have reached target
-        if (sgn(Err_m) > 0) { // err was positive, increasing -- continue
-          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
-          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
-        }
-        else { //err was negative reverse
-          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
-          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
-        }
-      }
-
-    
-
+  if (torque_cmd < ER_MARGIN) { //may not have reached target
+    RVS_Motors(MJ_BIN_m2, abs(torque_cmd));
+    FWD_Motors(MJ_BIN_m1, abs(torque_cmd));
+  }
 
   /*
      note that joints cannot generate infinitely large torques or forces. Need to set a torque_limit
   */
+
+
+  /*
+     cast data to the monitor
+  */
+  Serial.print(state_pos[0], 6); Serial.print(",");
+  Serial.print(state_pos[1], 6); Serial.print(",");
+  Serial.print(state_pos[2], 6); Serial.print("\t");
+
+  Serial.print(theta_d.pos.x, 6); Serial.print(",");
+  Serial.print(theta_d.pos.y, 6); Serial.print(",");
+  Serial.print(theta_d.pos.z, 6); Serial.print("\t");
+
+  Serial.print(theta_err_1); Serial.print(",");
+  Serial.print(theta_err_2); Serial.print(",");
+  Serial.print(theta_err_3); Serial.print("\t");
+
+  Serial.print(state_vel[0], 6); Serial.print(",");
+  Serial.print(state_vel[1], 6); Serial.print(",");
+  Serial.print(state_vel[2], 6); Serial.print("\t");
+
+  Serial.print(theta_d.vel.x, 6); Serial.print(",");
+  Serial.print(theta_d.vel.y, 6); Serial.print(",");
+  Serial.print(theta_d.vel.z, 6); Serial.print("\t");
+
+  Serial.print(tau_comp.tau_1, 6); Serial.print(",");
+  Serial.print(tau_comp.tau_2, 6); Serial.print(",");
+  Serial.print(tau_comp.tau_3, 6); Serial.print(",");
+  Serial.print(torque_cmd, 6); Serial.print(",");
+  Serial.print(control_cmd, 6);
+
+  Serial.println();
 
 }
 
@@ -1430,7 +1559,6 @@ void computeJointAngles(jntAngl_t& JointAngles, AnglesComps_t& Angle1, AnglesCom
   /*
      Computes the actual finger joints from the measured four IMU angles of each finger
   */
-
   float theta_1 = Angle1.aX + 180;
   float theta_2 = Angle2.aX + 180;
   float theta_3 = Angle3.aX + 180;
@@ -1439,10 +1567,15 @@ void computeJointAngles(jntAngl_t& JointAngles, AnglesComps_t& Angle1, AnglesCom
   JointAngles.theta_1 = theta_2 - theta_1;
   JointAngles.theta_2 = theta_3 - theta_2;
   JointAngles.theta_3 = theta_4 - theta_3;
-
 }
 
 void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_t& Coeff, unsigned currTime) {
+  /*
+     Function computes the desired_state -- length, dot-length, ddot-length -- using the Coeff and time.
+     Then these des_state are converted to theta_d, dottheta_d, ddottheta_d using the coupling matrix
+  */
+
+  float RADIANS_TO_DEGREES = 180 / 3.14159;
 
   tmm::Scalar pinv_H_1[3][1] = {
     {0.3875},
@@ -1457,23 +1590,35 @@ void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_
   tmm::Matrix<1, 3> H(H_1);
 
   //compute desired state using the computed coefficients
-  CubicTraj (des_state, Coeff, currTime);
+  double t = currTime * 1e-6; //assumes time is in microseconds
+  CubicTraj (des_state, Coeff, t);
 
   tmm::Matrix<3, 1> theta_i = pinv_H * des_state.pos.x;
   tmm::Matrix<3, 1> dottheta_i = pinv_H * des_state.vel.x;
 
-  desired_theta.pos.x = theta_i[0][1];
-  desired_theta.pos.y = theta_i[1][1];
-  desired_theta.pos.z = theta_i[2][1];
+  desired_theta.pos.x = theta_i[0][0] * RADIANS_TO_DEGREES;
+  desired_theta.pos.y = theta_i[1][0] * RADIANS_TO_DEGREES;
+  desired_theta.pos.z = theta_i[2][0] * RADIANS_TO_DEGREES;
 
-  desired_theta.vel.x = dottheta_i[0][1];
-  desired_theta.vel.y = dottheta_i[1][1];
-  desired_theta.vel.z = dottheta_i[2][1];
+  desired_theta.vel.x = dottheta_i[0][0] * RADIANS_TO_DEGREES;
+  desired_theta.vel.y = dottheta_i[1][0] * RADIANS_TO_DEGREES;
+  desired_theta.vel.z = dottheta_i[2][0] * RADIANS_TO_DEGREES;
 
   desired_theta.acc.x = 0.0;
   desired_theta.acc.y = 0.0;
   desired_theta.acc.z = 0.0;
 
+  /*
+    Serial.println();
+    Serial.print(desired_theta.pos.x, 6); Serial.print(",");
+    Serial.print(desired_theta.pos.y, 6); Serial.print(",");
+    Serial.print(desired_theta.pos.z, 6); Serial.print(",");
+
+    Serial.print(desired_theta.vel.x, 6); Serial.print(",");
+    Serial.print(desired_theta.vel.y, 6); Serial.print(",");
+    Serial.print(desired_theta.vel.z, 6); Serial.print(",");
+    Serial.println();
+  */
 
   /*
     SineTraj(state_t& des_state, unsigned currTime);
