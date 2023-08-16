@@ -29,10 +29,10 @@ typedef struct state state_t;
 typedef struct polyCoef polyCoef_t;
 
 struct IMUData {
-  float aX0, aY0, aZ0, gX0, gY0, gZ0;
+  double aX0, aY0, aZ0, gX0, gY0, gZ0;
 
     // Constructor to initialize all members to 0.0f
-  IMUData() : aX0(0.0f), aY0(0.0f), aZ0(0.0f), gX0(0.0f), gY0(0.0f), gZ0(0.0f) {}
+  IMUData() : aX0(0.0), aY0(0.0), aZ0(0.0), gX0(0.0), gY0(0.0), gZ0(0.0) {}
   /*
   void initialize() {
     aX0 = aY0 = aZ0 = gX0 = gY0 = gZ0 = 0.0f;
@@ -52,9 +52,9 @@ struct EncderCounts {
 };
 
 struct encRevs {
-  float m1, m2, m3, m4, m5, m6;
+  double m1, m2, m3, m4, m5, m6;
 
-  encRevs() : m1(0.0f), m2(0.0f), m3(0.0f), m4(0.0f), m5(0.0f), m6(0.0f) {}
+  encRevs() : m1(0.0), m2(0.0), m3(0.0), m4(0.0), m5(0.0), m6(0.0) {}
   /*
   void initialize() {
     m1 = m2 = m3 = m4 = m5 = m6 = 0.0f;
@@ -62,11 +62,11 @@ struct encRevs {
 };
 
 struct FsrScpData {
-  float amps1, amps2, amps3, amps4, amps5, amps6,
+  double amps1, amps2, amps3, amps4, amps5, amps6,
         scp1, scp2, scp3, scp4, fsr1, fsr2, fsr3, fsr4;
 
-        FsrScpData() : amps1(0.0f), amps2(0.0f), amps3(0.0f), amps4(0.0f), amps5(0.0f), 
-        amps6(0.0f), scp1(0.0f), scp2(0.0f), scp3(0.0f), scp4(0.0f), fsr1(0.0f), fsr2(0.0f), fsr3(0.0f), fsr4(0.0f) {}
+        FsrScpData() : amps1(0.0), amps2(0.0), amps3(0.0), amps4(0.0), amps5(0.0), 
+        amps6(0.0), scp1(0.0), scp2(0.0), scp3(0.0), scp4(0.0), fsr1(0.0), fsr2(0.0), fsr3(0.0), fsr4(0.0) {}
         /*
   void initialize() {
     amps1 = amps2 = amps3
@@ -77,9 +77,9 @@ struct FsrScpData {
 };
 
 struct AnglesComps {
-  float aX, aY, aZ, gX, gY, gZ, d_time;
+  double aX, aY, aZ, gX, gY, gZ, d_time;
 
-  AnglesComps() : aX(0.0f), aY(0.0f), aZ(0.0f), gX(0.0f), gY(0.0f), gZ(0.0f) {}
+  AnglesComps() : aX(0.0), aY(0.0), aZ(0.0), gX(0.0), gY(0.0), gZ(0.0) {}
   /*
   void initialize() {
     aX = aY = aZ = gX = gY = gZ = d_time = 0.0f;
@@ -87,9 +87,9 @@ struct AnglesComps {
 };
 
 struct AnglesDerivatives {
-  float rVel, pVel, yVel, rAcc, pAcc, yAcc;
+  double rVel, pVel, yVel, rAcc, pAcc, yAcc;
 
-  AnglesDerivatives() : rVel(0.0f), pVel(0.0f), yVel(0.0f), rAcc(0.0f), pAcc(0.0f), yAcc(0.0f) {}
+  AnglesDerivatives() : rVel(0.0), pVel(0.0), yVel(0.0), rAcc(0.0), pAcc(0.0), yAcc(0.0) {}
   /*
   void initialize() {
     rVel = pVel = yVel = rAcc = pAcc = yAcc = 0.0f;
@@ -97,9 +97,9 @@ struct AnglesDerivatives {
 };
 
 struct jntAngl {
-  float theta_1, theta_2, theta_3;
+  double theta_1, theta_2, theta_3;
 
-  jntAngl() : theta_1(0.0f), theta_2(0.0f), theta_3(0.0f) {}
+  jntAngl() : theta_1(0.0), theta_2(0.0), theta_3(0.0) {}
   /*
   void initialize() {
     theta_1 = theta_2 = theta_3 = 0.0f;
@@ -107,8 +107,8 @@ struct jntAngl {
 };
 
 struct fingAngles {
-  float a1, a2, a3;
-  fingAngles() : a1(0.0f), a2(0.0f), a3(0.0f) {}
+  double a1, a2, a3;
+  fingAngles() : a1(0.0), a2(0.0), a3(0.0) {}
   /*
   void initialize() {
     a1 = a2 = a3 = 0.0f;
@@ -116,8 +116,8 @@ struct fingAngles {
 };
 
 struct EulerAngIMU {
-  float roll, pitch;
-  EulerAngIMU() : roll(0.0f), pitch(0.0f) {}
+  double roll, pitch;
+  EulerAngIMU() : roll(0.0), pitch(0.0) {}
   /*
   void initialize() {
     roll = pitch = 0.0f;
@@ -125,8 +125,8 @@ struct EulerAngIMU {
 };
 
 struct coords {
-  float x, y, z;
-  coords() : x(0.0f), y(0.0f), z(0.0f) {}
+  double x, y, z;
+  coords() : x(0.0), y(0.0), z(0.0) {}
   /*
   void initialize() {
     x = y = z = 0.0f;
@@ -134,8 +134,8 @@ struct coords {
 };
 
 struct trq {
-  float tau_1, tau_2, tau_3;
-  trq() : tau_1(0.0f), tau_2(0.0f), tau_3(0.0f) {}
+  double tau_1, tau_2, tau_3;
+  trq() : tau_1(0.0), tau_2(0.0), tau_3(0.0) {}
   /*
   void initialize() {
     tau_1 = tau_2 = tau_3 = 0.0f;
@@ -147,9 +147,9 @@ struct state {
 };
 
 struct polyCoef {
-  float a0, a1, a2, a3, a4, a5;
+  double a0, a1, a2, a3, a4, a5;
 
-polyCoef() : a0(0.0f), a1(0.0f), a2(0.0f), a3(0.0f), a4(0.0f), a5(0.0f) {}
+polyCoef() : a0(0.0), a1(0.0), a2(0.0), a3(0.0), a4(0.0), a5(0.0) {}
   
   /*
   void initialize() {
@@ -173,7 +173,7 @@ float Voltage2Force(int );
 void SineTraj(state_t&, unsigned );
 void CubicTrajCoeff (polyCoef_t& , unsigned , unsigned , float , float , float , float );
 void QuinticTrajCoeff (polyCoef_t& , unsigned , unsigned , float , float , float , float , float , float );
-void CubicTraj (state_t& , polyCoef_t& , unsigned );
+void CubicTraj (state_t& , polyCoef_t& , double );
 void QuinticTraj (state_t& , polyCoef_t& , unsigned );
 float rotSpeed (float, float , float, float );
 #endif
