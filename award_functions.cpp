@@ -225,10 +225,10 @@ float Voltage2Force(int forceBits) {
 
 void SineTraj(state_t& des_state, unsigned currTime) {
   /*
-     generates signals for sinusiadal position, velocity and acceleration of the 
+     generates signals for sinusiadal position, velocity and acceleration of the
      tendon lengths, hence only 1D
   */
-  
+
   des_state.pos.x = sin(currTime);
   des_state.pos.y = 0;
   des_state.pos.z = 0;
@@ -240,19 +240,19 @@ void SineTraj(state_t& des_state, unsigned currTime) {
   des_state.acc.x = -1 * sin(currTime);
   des_state.acc.y = 0;
   des_state.acc.z = 0;
-  
-/*
-  des_state.pos.x = sin(currTime);
-  des_state.pos.y = -1 * cos(currTime);
-  des_state.pos.z = sin(currTime);
 
-  des_state.vel.x = cos(currTime);
-  des_state.vel.y = sin(currTime);
-  des_state.vel.z = cos(currTime);
+  /*
+    des_state.pos.x = sin(currTime);
+    des_state.pos.y = -1 * cos(currTime);
+    des_state.pos.z = sin(currTime);
 
-  des_state.acc.x = -1 * sin(currTime);
-  des_state.acc.y = cos(currTime);
-  des_state.acc.z = -1 * sin(currTime);
+    des_state.vel.x = cos(currTime);
+    des_state.vel.y = sin(currTime);
+    des_state.vel.z = cos(currTime);
+
+    des_state.acc.x = -1 * sin(currTime);
+    des_state.acc.y = cos(currTime);
+    des_state.acc.z = -1 * sin(currTime);
   */
 }
 
@@ -262,13 +262,23 @@ void CubicTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float
      computes the coefficients to fit a cubic function for a given
      set of initial and final conditions for velocity and acceleration
   */
-  unsigned T = t_final - t_init;
+  unsigned T = (t_final - t_init) * 1e-3;
   Coeff.a0 = PosInit;
   Coeff.a1 = VelInit;
   Coeff.a2 = -1 * (3 * PosInit - 3 * PosFinal - VelInit + VelFinal + 3 * T * VelInit) / (T * (3 * T - 2));
   Coeff.a3 = (2 * PosInit - 2 * PosFinal + T * VelInit + T * VelFinal) / (pow(T, 3) * (3 * T - 2));
   Coeff.a4 = 0;
   Coeff.a5 = 0;
+/*
+  Serial.print(Coeff.a0); Serial.print(",");
+  Serial.print(Coeff.a1); Serial.print(",");
+  Serial.print(Coeff.a2, 5); Serial.print(",");
+  Serial.print(Coeff.a3,8); Serial.print(",");
+  Serial.print(Coeff.a4); Serial.print(",");
+  Serial.print(Coeff.a5); Serial.print(",");
+  Serial.print(PosFinal); Serial.print(",");
+  Serial.print(T); Serial.println();
+  */
 }
 
 void QuinticTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float PosInit,
@@ -290,10 +300,10 @@ void QuinticTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, flo
                    pow(T, 2) - AccFinal * pow(T, 2)) / (2 * pow(T, 5));
 }
 
-void CubicTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
+void CubicTraj (state_t& des_state, polyCoef_t& Coeff, double t) {
   /*
-     given the constants for a cubic function and time, compute the target position,
-     and velocity
+     given the constants for a cubic function and time, compute the target position (tendon length),
+     and tendon velocity. Time is in seconds.
   */
   des_state.pos.x = Coeff.a0 + Coeff.a1 * t + Coeff.a2 * pow(t, 2) + Coeff.a3 * pow(t, 3);
   des_state.pos.y = 0.0;
@@ -307,11 +317,18 @@ void CubicTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
   des_state.acc.y = 0.0;
   des_state.acc.z = 0.0;
 
+/*
+  Serial.println();
+  Serial.print(des_state.pos.x, 8); Serial.print(",");
+  Serial.print(des_state.vel.x, 8); Serial.print(",");
+  Serial.print(t, 4); Serial.println();
+*/
 }
 
 void QuinticTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
   /*
-     compute the position, velocity, and acceleration given the constants for quintic polynomial and the current time
+     compute the tendon position/length, tendon velocity, and tendon acceleration given the constants
+     for quintic polynomial and the current time
   */
   des_state.pos.x = Coeff.a0 + Coeff.a1 * t + Coeff.a2 * pow(t, 2) + Coeff.a3 * pow(t, 3) + Coeff.a4 * pow(t, 4) + Coeff.a5 * pow(t, 5);
   des_state.pos.y = 0.0;
