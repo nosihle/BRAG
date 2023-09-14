@@ -268,6 +268,9 @@ void setup(void) {
 
   t_dur = millis(); t_now = millis();
 
+
+  //Computed Controll Implementation
+
   //initialize control variables
   polyCoef_t COEFF;
   float PosInit = 0.0;
@@ -277,19 +280,10 @@ void setup(void) {
   unsigned t_init = millis();
   float duration = 10; //seconds
   unsigned t_final = t_init + duration * 1000;
-  unsigned currTime, endTime;
   //call function generator of choice, using cubic function for now, to compute coefficients
   CubicTrajCoeff (COEFF, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
-  /*
-    Serial.print(COEFF.a0); Serial.print(",");
-    Serial.print(COEFF.a1); Serial.print(",");
-    Serial.print(COEFF.a2, 5); Serial.print(",");
-    Serial.print(COEFF.a3,8); Serial.print(",");
-    Serial.print(COEFF.a4); Serial.print(",");
-    Serial.print(COEFF.a5); Serial.print(",");
-  */
 
-  //repeat this for a set number of iterations
+  //repeat this for a set duration
   // initialize position, velocity and acceleration
   float theta_0 = 0.0f; float theta_1 = 0.0f;
   float theta_2 = 0.0f; float theta_3 = 0.0f;
@@ -308,106 +302,230 @@ void setup(void) {
   float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
   float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
   unsigned long nowTime;
+  double nowTime_S;
+  double deltaT;
   double timeChange;
+  double radius = 0.015; //cm
+  double Lt = 16.5; //cm
+  state_t tendon_len; //Initialize q1 = 0,q2 = 0; No motor rotations
+  state_t tendon_vel;
+  int GR = 30.0f; int CPR = 12.0;
+  double rotsFromDisp_1;
+  double rotsFromDisp_2;
+  double motorRotSpeed_1;
+  double motorRotSpeed_2;
+  int long goalTicks_1;
+  int long goalTicks_2;
+  int long refTicks_1;
+  int long refTicks_2;
+  int motor_pos_1;
+  int motor_pos_2;
+  double motorRotSpeed_c1;
+  double motorRotSpeed_c2;
 
-  for (int count = 0; count < 10; count++) {
+  // define PID control gains
+  float KP = 3.0;
+  float KD = 0.5;
+  float KI = 0.0;
+
+  int ER_MARGIN = 1000;
+  double err_m1, err_m2;
+  double doterr_m1, doterr_m2;
+  double e_integral = 0.0;
+  double E_IN_MAX = 10000;
+  double u, vel_PD;
+
+  //Read sensor readings to get current pos
+  getEncCounts(ticks, rots);
+  getSensorData(sensorData);
+
+  //should always be zero since it is incremental encoder.
+  int motor_pos_1prev = ticks.m3;
+  int motor_pos_2prev = ticks.m4;
+  double currTime = micros() * 1e-6;
+  double endTime = currTime + 10; //run for 10 seconds
+
+  while (currTime <= endTime ) {
     //Update/compute desired_theta from desired_state
-    currTime = micros();
-    computeDesiredStates (theta_d, desired_state, COEFF, currTime);
 
-    //update state_pos, state_vel
+    //theta_d, dottheta_d has been computed/updated. h
+    computeDesiredStates (theta_d, desired_state, COEFF, currTime); // currTime must be in seconds
 
-    //keep data from previous set. Only care about angles
-    angl_1_old = fingState.pos.x;
-    angl_2_old = fingState.pos.y;
-    angl_3_old = fingState.pos.z;
+    //Compute the q from theta_d, dotq from theta_d, dottheta
+    computeTendonLengths (tendon_len, theta_d);
+    computeTendonVelocity (tendon_vel, theta_d);
 
-    dot_angl_1_old = fingState.vel.x;
-    dot_angl_2_old = fingState.vel.y;
-    dot_angl_3_old = fingState.vel.z;
+    //convert pos_des to motor rotations
+    rotsFromDisp_1 = dispToRots(tendon_len.pos.x, radius, Lt); // gives rotations
+    rotsFromDisp_2 = dispToRots(tendon_len.pos.y, radius, Lt); // gives rotations
 
-    dDot_angl_1_old = fingState.acc.x;
-    dDot_angl_2_old = fingState.acc.y;
-    dDot_angl_3_old = fingState.acc.z;
+    motorRotSpeed_1 = rotSpeed (tendon_vel.pos.x, Lt, rotsFromDisp_1, radius); // gives motor rotational speed (radians/second)
+    motorRotSpeed_2 = rotSpeed (tendon_vel.pos.y, Lt, rotsFromDisp_2, radius); // gives motor rotational speed
 
-    vel_1_old = velAcc1.pVel;
-    vel_2_old = velAcc2.pVel;
-    vel_3_old = velAcc3.pVel;
-    vel_4_old = velAcc6.pVel;
+    goalTicks_1 = rotsFromDisp_1 * CPR * GR;
+    goalTicks_2 = rotsFromDisp_2 * CPR * GR;
 
-    // read sensor data
-    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
-    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
-    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
-    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+    refTicks_1 = motor_pos_1prev + goalTicks_1; // target position will be what was initially there
+    refTicks_2 = motor_pos_2prev + goalTicks_2;
 
-    //compute angles using updated sensor info
-    computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
-    computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
-    computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
-    computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
+    //desired motor speed and position have been computed, now update sensor info
+    //Read sensor readings to get current pos
+    getEncCounts(ticks, rots);
+    getSensorData(sensorData);
+    nowTime = micros();
+    nowTime_S = nowTime * 1e-6;
 
-    //get needed angles and compute derivatives
-    theta_0 = anglesNew1.aX + 180;
-    theta_1 = anglesNew2.aX + 180;
-    theta_2 = anglesNew3.aX + 180;
-    theta_3 = anglesNew6.aX + 180;
+    deltaT = nowTime_S - currTime;
 
-    //compute joint angles
-    fingState.pos.x = theta_1 - theta_0;
-    fingState.pos.y = theta_2 - theta_1;
-    fingState.pos.z = theta_3 - theta_2;
+    motor_pos_1 = ticks.m3;
+    motor_pos_2 = ticks.m4;
 
-    state_pos[0] = fingState.pos.x;
-    state_pos[1] = fingState.pos.y;
-    state_pos[2] = fingState.pos.z;
+    motorRotSpeed_c1 = (2 * PI * ((motor_pos_1 / (CPR * GR)) - (motor_pos_1prev / (CPR * GR)))) / deltaT; // radians / seconds.
+    motorRotSpeed_c2 = (2 * PI * ((motor_pos_2 / (CPR * GR)) - (motor_pos_2prev / (CPR * GR)))) / deltaT; // radians / seconds.
+
+    err_m1 = (motor_pos_1 / (CPR * GR)) - rotsFromDisp_1;
+    err_m2 = (motor_pos_2 / (CPR * GR)) - rotsFromDisp_2;
+    doterr_m1 = motorRotSpeed_c1 - motorRotSpeed_1;
+    doterr_m2 =  motorRotSpeed_c1 - motorRotSpeed_2;
+    e_integral = e_integral + err_m1 * deltaT;
+
+    //check to ensure that there is no antiwindup
+    if (e_integral > E_IN_MAX) {
+      e_integral = E_IN_MAX;
+    } else if (e_integral < -1 * E_IN_MAX) {
+      e_integral = -1 * E_IN_MAX;
+    }
+
+    u = KP * err_m1 + KI * e_integral + KD * (err_m1 / deltaT);
+
+    // normalize to PWM using tanh
+    vel_PD = tanh(u) * 255;
+
+    if (vel_PD > 255) { //Check for saturation
+      vel_PD = 255;
+    } else if (vel_PD < -1 * 255) {
+      vel_PD = -1 * 255;
+    }
+
+    //Drive motors in opposite directions
+    if (sgn(vel_PD) > 0) {
+      FWD_Motors(m_FNT3, abs(vel_PD));
+      RVS_Motors(m_FNT4, abs(vel_PD));
+    }
+    else {
+      RVS_Motors(m_FNT3, abs(vel_PD));
+      FWD_Motors(m_FNT4, abs(vel_PD));
+    }
 
 
-    endTime = micros();
-    timeChange = (endTime - currTime) * 1e-6;// dt is in seconds
+    //  if (vel_PD < 50) { //minimum PWM to overcome friction
+    //  vel_PD  = 50;
+    // } else if (vel_PD > -1 * 50) {
+    //  vel_PD = -1 * 50;
+    //}
 
-    dot_angl_1 = (fingState.pos.x - angl_1_old) / timeChange;
-    dot_angl_2 = (fingState.pos.y - angl_2_old) / timeChange;
-    dot_angl_3 = (fingState.pos.z - angl_3_old) / timeChange;
+    currTime = nowTime * 1e-6;
 
-    fingState.vel.x = 0.8 * dot_angl_1_old + 0.0155 * dot_angl_1;
-    fingState.vel.y = 0.8 * dot_angl_2_old + 0.0155 * dot_angl_2;
-    fingState.vel.z = 0.8 * dot_angl_3_old + 0.0155 * dot_angl_3;
 
-    state_vel[0] = fingState.vel.x;
-    state_vel[1] = fingState.vel.y;
-    state_vel[2] = fingState.vel.z;
+    /*
 
-    dDot_angl_1 = (fingState.vel.x - dot_angl_1_old) / timeChange;
-    dDot_angl_2 = (fingState.vel.y - dot_angl_2_old) / timeChange;
-    dDot_angl_3 = (fingState.vel.z - dot_angl_3_old) / timeChange;
+          //positionControllerMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, targetTicks, deltaT, initPos) ; //follow this generated position
 
-    fingState.acc.x = 0.8 * dDot_angl_1_old + 0.0155 * dDot_angl_1;
-    fingState.acc.y = 0.8 * dDot_angl_2_old + 0.0155 * dDot_angl_2;
-    fingState.acc.z = 0.8 * dDot_angl_3_old + 0.0155 * dDot_angl_3;
+          //velocityControllerMM(m1_ticks, m2_ticks, MJ_BIN_m1[2], MJ_BIN_m2[2], curVel, targetVel, deltaT, fingJoints);
 
-    velAcc1.pVel = velAcc1.pVel + vel_1_old;
-    velAcc2.pVel = velAcc2.pVel + vel_1_old;
-    velAcc3.pVel = velAcc3.pVel + vel_1_old;
-    velAcc6.pVel = velAcc6.pVel + vel_1_old;
+          //update state_pos, state_vel
+          //keep data from previous set. Only care about angles
+          angl_1_old = fingState.pos.x;
+          angl_2_old = fingState.pos.y;
+          angl_3_old = fingState.pos.z;
 
-    computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G, m_FNT3, m_FNT4);
-    //Serial.print(currTime * 1e-6); Serial.println();
+          dot_angl_1_old = fingState.vel.x;
+          dot_angl_2_old = fingState.vel.y;
+          dot_angl_3_old = fingState.vel.z;
 
+          dDot_angl_1_old = fingState.acc.x;
+          dDot_angl_2_old = fingState.acc.y;
+          dDot_angl_3_old = fingState.acc.z;
+
+          vel_1_old = velAcc1.pVel;
+          vel_2_old = velAcc2.pVel;
+          vel_3_old = velAcc3.pVel;
+          vel_4_old = velAcc6.pVel;
+
+          // read sensor data
+          readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+          readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+          readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+          readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+
+          //compute angles using updated sensor info
+          computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
+          computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
+          computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
+          computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
+
+          //get needed angles and compute derivatives
+          theta_0 = anglesNew1.aX + 180;
+          theta_1 = anglesNew2.aX + 180;
+          theta_2 = anglesNew3.aX + 180;
+          theta_3 = anglesNew6.aX + 180;
+
+          //compute joint angles
+          fingState.pos.x = theta_1 - theta_0;
+          fingState.pos.y = theta_2 - theta_1;
+          fingState.pos.z = theta_3 - theta_2;
+
+          state_pos[0] = fingState.pos.x;
+          state_pos[1] = fingState.pos.y;
+          state_pos[2] = fingState.pos.z;
+
+          endTime = micros();
+          timeChange = (endTime - currTime) * 1e-6;// dt is in seconds
+
+          dot_angl_1 = (fingState.pos.x - angl_1_old) / timeChange;
+          dot_angl_2 = (fingState.pos.y - angl_2_old) / timeChange;
+          dot_angl_3 = (fingState.pos.z - angl_3_old) / timeChange;
+
+          fingState.vel.x = 0.8 * dot_angl_1_old + 0.0155 * dot_angl_1;
+          fingState.vel.y = 0.8 * dot_angl_2_old + 0.0155 * dot_angl_2;
+          fingState.vel.z = 0.8 * dot_angl_3_old + 0.0155 * dot_angl_3;
+
+          state_vel[0] = fingState.vel.x;
+          state_vel[1] = fingState.vel.y;
+          state_vel[2] = fingState.vel.z;
+
+          dDot_angl_1 = (fingState.vel.x - dot_angl_1_old) / timeChange;
+          dDot_angl_2 = (fingState.vel.y - dot_angl_2_old) / timeChange;
+          dDot_angl_3 = (fingState.vel.z - dot_angl_3_old) / timeChange;
+
+          fingState.acc.x = 0.8 * dDot_angl_1_old + 0.0155 * dDot_angl_1;
+          fingState.acc.y = 0.8 * dDot_angl_2_old + 0.0155 * dDot_angl_2;
+          fingState.acc.z = 0.8 * dDot_angl_3_old + 0.0155 * dDot_angl_3;
+
+          velAcc1.pVel = velAcc1.pVel + vel_1_old;
+          velAcc2.pVel = velAcc2.pVel + vel_1_old;
+          velAcc3.pVel = velAcc3.pVel + vel_1_old;
+          velAcc6.pVel = velAcc6.pVel + vel_1_old;
+
+
+          computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G, m_FNT3, m_FNT4);
+
+    */
   }
+
   //reached desired position, so stop
   STOP_Motors(m_FNT3);
   STOP_Motors(m_FNT4);
+
+
   // control
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
 
-
-
 }
 
 void loop(void) {
-  //butControl(pinNum); //CW for top motor (undo from 1 pos)
+  butControl(pinNum); //CW for top motor (undo from 1 pos)
   //butControlRVS(pinNum); //CCW for top motor
   t_now = millis();
   if (t_now - millisPrevious >= millisPerReading) {
@@ -776,8 +894,17 @@ void getSensorData(FsrScpData_t& data) { // Read the data from the ADS 1115.
   data.fsr4 = ads4.readADC_SingleEnded(1);
 
   //convert to Amps using sensor datasheet
-  data.amps1 = (amps1 * SCALE - Viout) / SENSITIVITY;
-  data.amps2 = (amps2 * SCALE - Viout) / SENSITIVITY;
+  /*
+    data.amps1 = (amps1 * SCALE - Viout) / SENSITIVITY;
+    data.amps2 = (amps2 * SCALE - Viout) / SENSITIVITY;
+  */
+
+  /*
+     temporarily replace amps1 and amps2 with raw current values for m3 and m4
+  */
+  data.amps1 = amps3;
+  data.amps2 = amps4;
+
   data.amps3 = (amps3 * SCALE - Viout) / SENSITIVITY;
   data.amps4 = (amps4 * SCALE - Viout) / SENSITIVITY;
   data.amps5 = (amps5 * SCALE - Viout) / SENSITIVITY;
@@ -1105,37 +1232,39 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
         }
     */
 
-    Serial.print(accel1.acceleration.x); Serial.print(",");
-    Serial.print(accel1.acceleration.y); Serial.print(",");
-    Serial.print(accel1.acceleration.z); Serial.print(",");
+    /*
+        Serial.print(accel1.acceleration.x); Serial.print(",");
+        Serial.print(accel1.acceleration.y); Serial.print(",");
+        Serial.print(accel1.acceleration.z); Serial.print(",");
 
-    Serial.print(accel2.acceleration.x); Serial.print(",");
-    Serial.print(accel2.acceleration.y); Serial.print(",");
-    Serial.print(accel2.acceleration.z); Serial.print(",");
+        Serial.print(accel2.acceleration.x); Serial.print(",");
+        Serial.print(accel2.acceleration.y); Serial.print(",");
+        Serial.print(accel2.acceleration.z); Serial.print(",");
 
-    Serial.print(accel3.acceleration.x); Serial.print(",");
-    Serial.print(accel3.acceleration.y); Serial.print(",");
-    Serial.print(accel3.acceleration.z); Serial.print(",");
+        Serial.print(accel3.acceleration.x); Serial.print(",");
+        Serial.print(accel3.acceleration.y); Serial.print(",");
+        Serial.print(accel3.acceleration.z); Serial.print(",");
 
-    Serial.print(accel6.acceleration.x); Serial.print(",");
-    Serial.print(accel6.acceleration.y); Serial.print(",");
-    Serial.print(accel6.acceleration.z); Serial.print(",");
+        Serial.print(accel6.acceleration.x); Serial.print(",");
+        Serial.print(accel6.acceleration.y); Serial.print(",");
+        Serial.print(accel6.acceleration.z); Serial.print(",");
 
-    Serial.print(gyro1.gyro.x); Serial.print(",");
-    Serial.print(gyro1.gyro.y); Serial.print(",");
-    Serial.print(gyro1.gyro.z); Serial.print(",");
+        Serial.print(gyro1.gyro.x); Serial.print(",");
+        Serial.print(gyro1.gyro.y); Serial.print(",");
+        Serial.print(gyro1.gyro.z); Serial.print(",");
 
-    Serial.print(gyro2.gyro.x); Serial.print(",");
-    Serial.print(gyro2.gyro.y); Serial.print(",");
-    Serial.print(gyro2.gyro.z); Serial.print(",");
+        Serial.print(gyro2.gyro.x); Serial.print(",");
+        Serial.print(gyro2.gyro.y); Serial.print(",");
+        Serial.print(gyro2.gyro.z); Serial.print(",");
 
-    Serial.print(gyro3.gyro.x); Serial.print(",");
-    Serial.print(gyro3.gyro.y); Serial.print(",");
-    Serial.print(gyro3.gyro.z); Serial.print(",");
+        Serial.print(gyro3.gyro.x); Serial.print(",");
+        Serial.print(gyro3.gyro.y); Serial.print(",");
+        Serial.print(gyro3.gyro.z); Serial.print(",");
 
-    Serial.print(gyro6.gyro.x); Serial.print(",");
-    Serial.print(gyro6.gyro.y); Serial.print(",");
-    Serial.print(gyro6.gyro.z); Serial.print(",");//24
+        Serial.print(gyro6.gyro.x); Serial.print(",");
+        Serial.print(gyro6.gyro.y); Serial.print(",");
+        Serial.print(gyro6.gyro.z); Serial.print(",");//24
+    */
 
     Serial.print(anglesNew1.aX, 3); Serial.print(",");
     Serial.print(anglesNew2.aX, 3); Serial.print(",");
@@ -1185,7 +1314,10 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     Serial.print(velAcc3.pAcc); Serial.print(",");
 
     Serial.print(velAcc6.pVel); Serial.print(",");
-    Serial.print(velAcc6.pAcc);
+    Serial.print(velAcc6.pAcc); Serial.print(",");
+
+    Serial.print(sensorData.amps1); Serial.print(","); //raw current values
+    Serial.print(sensorData.amps2); Serial.print(",");
 
     Serial.println();
 
@@ -1521,10 +1653,10 @@ void computedTorqueController (double state_pos[3], double state_vel[3], state_t
      note that joints cannot generate infinitely large torques or forces. Need to set a torque_limit
   */
 
-
   /*
      cast data to the monitor
   */
+
   Serial.print(state_pos[0], 6); Serial.print(",");
   Serial.print(state_pos[1], 6); Serial.print(",");
   Serial.print(state_pos[2], 6); Serial.print("\t");
@@ -1569,44 +1701,30 @@ void computeJointAngles(jntAngl_t& JointAngles, AnglesComps_t& Angle1, AnglesCom
   JointAngles.theta_3 = theta_4 - theta_3;
 }
 
-void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_t& Coeff, unsigned currTime) {
+void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_t& Coeff, double currTime) {
   /*
-     Function computes the desired_state -- length, dot-length, ddot-length -- using the Coeff and time.
-     Then these des_state are converted to theta_d, dottheta_d, ddottheta_d using the coupling matrix
+     Function computes the desired_state -- theta_total, dot-theta_total, ddot-theta_total -- using the Coeff and time.
+     Then these des_state are converted to theta_d, dottheta_d, ddottheta_d using the kinematic relations
+     desired_theta is in degrees, degrees/seconds, degrees/second*second
+     currTime is in seconds
   */
 
-  float RADIANS_TO_DEGREES = 180 / 3.14159;
-
-  tmm::Scalar pinv_H_1[3][1] = {
-    {0.3875},
-    { -0.2738},
-    {0.0794}
-  };
-  tmm::Matrix<3, 1> pinv_H(pinv_H_1);
-
-  tmm::Scalar H_1[1][3] = {
-    {1.6744, -1.1830, 0.3433}
-  };
-  tmm::Matrix<1, 3> H(H_1);
+  //float RADIANS_TO_DEGREES = 180 / 3.14159;
 
   //compute desired state using the computed coefficients
-  double t = currTime * 1e-6; //assumes time is in microseconds
-  CubicTraj (des_state, Coeff, t);
+  CubicTraj (des_state, Coeff, currTime); //return theta_total desired
 
-  tmm::Matrix<3, 1> theta_i = pinv_H * des_state.pos.x;
-  tmm::Matrix<3, 1> dottheta_i = pinv_H * des_state.vel.x;
+  desired_theta.pos.x = 0.6443 * des_state.pos.x - 23.9184;
+  desired_theta.pos.y = -0.0152 * des_state.pos.x + 11.3561;
+  desired_theta.pos.z = 0.3709 * des_state.pos.x + 12.5623;
 
-  desired_theta.pos.x = theta_i[0][0] * RADIANS_TO_DEGREES;
-  desired_theta.pos.y = theta_i[1][0] * RADIANS_TO_DEGREES;
-  desired_theta.pos.z = theta_i[2][0] * RADIANS_TO_DEGREES;
+  desired_theta.vel.x = 0.6443 * des_state.vel.x;
+  desired_theta.vel.y = -0.0152 * des_state.vel.x;
+  desired_theta.vel.z = 0.3709 * des_state.vel.x;
 
-  desired_theta.vel.x = dottheta_i[0][0] * RADIANS_TO_DEGREES;
-  desired_theta.vel.y = dottheta_i[1][0] * RADIANS_TO_DEGREES;
-  desired_theta.vel.z = dottheta_i[2][0] * RADIANS_TO_DEGREES;
-
-  desired_theta.acc.x = 0.0;
-  desired_theta.acc.y = 0.0;
-  desired_theta.acc.z = 0.0;
+  desired_theta.acc.x = 0.6443 * des_state.acc.x;
+  desired_theta.acc.y = -0.0152 * des_state.acc.x;
+  desired_theta.acc.z = 0.3709 * des_state.acc.x;
 
   /*
     Serial.println();
@@ -1627,4 +1745,206 @@ void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_
     QuinticTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t);
   */
 
+}
+
+void velocityControllerMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BIN_m2[2],
+                          float curVel, float targetVel, double deltaT, state_t& fingJoints, int initPos) {
+  /*
+     This function controls two antagonistic motors to attain a desired velocity of the finger
+     In this case, it is assumed that the motors are of the same gear ratio, hence speed
+     It is assmued that the motor for M3 is winding clockwise
+
+     It is noted that only one motor is used for the velocity control. Otherwise, curVel and targetVel will be
+     vectors for both motors. This can be updated.
+  */
+
+  double e_integral = 0.0;
+
+  int ER_MARGIN = 5; // degrees/second
+  double E_IN_MAX = 10000;
+
+  long int err_m1 = abs(curVel) - targetVel;
+
+  //get the direction flags
+  int m1_flg = sgn(curVel);
+
+  int m1_flg_new = m1_flg;
+
+  // define PID control gains
+  float KP = 0.0003;
+  float KD = 0;
+  float KI = 0.1;
+  double loopTime = 0.02; //
+
+  e_integral = e_integral + err_m1 * deltaT;
+
+  //check to ensure that there is no antiwindup
+  if (e_integral > E_IN_MAX) {
+    e_integral = E_IN_MAX;
+  } else if (e_integral < -1 * E_IN_MAX) {
+    e_integral = -1 * E_IN_MAX;
+  }
+
+  double u = KP * err_m1 + KI * e_integral + KD * (err_m1 / deltaT);
+
+  // normalize to PWM using tanh
+  double vel_PD = tanh(u) * 255;
+
+  if (vel_PD > 255) { //Check for saturation
+    vel_PD = 255;
+  } else if (vel_PD < -1 * 255) {
+    vel_PD = -1 * 255;
+  }
+
+  if (initPos == 0) {//finger is starting at the folded state
+    if (abs(err_m1) > ER_MARGIN) { //may have overshot target
+      if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+      else {//err was negative, continue
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+    }
+
+    if (abs(err_m1) < ER_MARGIN) { //may not have reached target
+      if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+      else { //err was negative reverse
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+    }
+  }
+
+  if (initPos == 1) { // finger is starting at the straight configuration
+    if (abs(err_m1) > ER_MARGIN) { //may have overshot target
+      if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+      else {//err was negative, continue
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+    }
+
+    if (abs(err_m1) < ER_MARGIN) { //may not have reached target
+      if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+      else { //err was negative reverse
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+    }
+  }
+}
+
+void positionControllerMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BIN_m2[2],
+                          long int targetTicks, double deltaT, int initPos) {
+  /*
+     This function controls two antagonistic motors to attain a desired position of a finger
+     In this case, it is assumed that the motors are of the same gear ratio, hence speed
+
+     If the motors are of the different gear ratios, the faster motor needs to be slowed down
+     by scaling the computed PWM. The scaling factor will be determined experimentally
+  */
+
+  int ER_MARGIN = 1000;
+  long int err_m1 = abs(m1_ticks) - targetTicks;// m1_ticks
+  long int err_m2 = abs(m2_ticks) - targetTicks; //m2_ticks
+  long int Err_m = 0;
+
+  double e_integral = 0.0;
+
+  double E_IN_MAX = 10000;
+
+  //get the direction flags
+  int m1_flg = sgn(m1_ticks);
+
+  int m1_flg_new = m1_flg;
+
+  // define PID control gains
+  float KP = 0.0003;
+  float KD = 0;
+  float KI = 0.1;
+
+  e_integral = e_integral + err_m1 * deltaT;
+
+  //check to ensure that there is no antiwindup
+  if (e_integral > E_IN_MAX) {
+    e_integral = E_IN_MAX;
+  } else if (e_integral < -1 * E_IN_MAX) {
+    e_integral = -1 * E_IN_MAX;
+  }
+
+  double u = KP * err_m1 + KI * e_integral + KD * (err_m1 / deltaT);
+
+  // normalize to PWM using tanh
+  double vel_PD = tanh(u) * 255;
+
+  if (vel_PD > 255) { //Check for saturation
+    vel_PD = 255;
+  } else if (vel_PD < -1 * 255) {
+    vel_PD = -1 * 255;
+  }
+
+  if (vel_PD < 50) { //minimum PWM to overcome friction
+    vel_PD  = 50;
+  } else if (vel_PD > -1 * 50) {
+    vel_PD = -1 * 50;
+  }
+
+  if (initPos == 0) {//finger is starting at the folded state
+    if (abs(err_m1) > ER_MARGIN) { //may have overshot target
+      if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+      else {//err was negative, continue
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+    }
+
+    if (abs(err_m1) < ER_MARGIN) { //may not have reached target
+      if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+      else { //err was negative reverse
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+      }
+    }
+  }
+
+  if (initPos == 1) { // finger is starting at the straight configuration
+    if (abs(err_m1) > ER_MARGIN) { //may have overshot target
+      if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+      else {//err was negative, continue
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+    }
+
+    if (abs(err_m1) < ER_MARGIN) { //may not have reached target
+      if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
+        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+      else { //err was negative reverse
+        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+      }
+    }
+  }
 }

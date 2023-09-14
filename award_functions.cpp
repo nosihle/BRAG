@@ -176,7 +176,7 @@ float dispToRots(float displ, float radius, float Lt) {
     TODO: improve function such that radius and Lt are not inputs
   */
   float numRots = sqrt(displ * displ + 2 * displ * Lt) / (2 * PI * radius);
-  return numRots;
+  return numRots; 
 }
 
 float rotSpeed (float linSpeed, float Lt, float n, float radius) {
@@ -185,8 +185,8 @@ float rotSpeed (float linSpeed, float Lt, float n, float radius) {
      radius are in the same units (cm / m) and linSpeed is also in corresponding units
      cm/s or m/s
   */
-  float theta = 2 * PI * n; //radians
-  return linSpeed * sqrt(pow(Lt, 2) + pow(theta * radius, 2)) / (theta * pow(radius, 2));
+  float theta = 2 * PI * n; // radians
+  return linSpeed * sqrt(pow(Lt, 2) + pow(theta * radius, 2)) / (theta * pow(radius, 2)); //radians/second
 }
 
 int sgn(float num) {
@@ -262,22 +262,26 @@ void CubicTrajCoeff (polyCoef_t& Coeff, unsigned t_init, unsigned t_final, float
      computes the coefficients to fit a cubic function for a given
      set of initial and final conditions for velocity and acceleration
   */
-  unsigned T = (t_final - t_init) * 1e-3;
+  //unsigned T = (t_final - t_init) * 1e-3;
+  unsigned T = t_final * 1e-3;
   Coeff.a0 = PosInit;
   Coeff.a1 = VelInit;
-  Coeff.a2 = -1 * (3 * PosInit - 3 * PosFinal - VelInit + VelFinal + 3 * T * VelInit) / (T * (3 * T - 2));
-  Coeff.a3 = (2 * PosInit - 2 * PosFinal + T * VelInit + T * VelFinal) / (pow(T, 3) * (3 * T - 2));
+  //Coeff.a2 = -1 * (3 * PosInit - 3 * PosFinal - VelInit + VelFinal + 3 * T * VelInit) / (T * (3 * T - 2));
+  //Coeff.a3 = (2 * PosInit - 2 * PosFinal + T * VelInit + T * VelFinal) / (pow(T, 3) * (3 * T - 2));
+  Coeff.a2 = 3 * (PosFinal - PosInit) / (pow(T, 2));
+  Coeff.a3 = -2 * (PosFinal - PosInit) / (pow(T, 3));
   Coeff.a4 = 0;
   Coeff.a5 = 0;
-/*
-  Serial.print(Coeff.a0); Serial.print(",");
-  Serial.print(Coeff.a1); Serial.print(",");
-  Serial.print(Coeff.a2, 5); Serial.print(",");
-  Serial.print(Coeff.a3,8); Serial.print(",");
-  Serial.print(Coeff.a4); Serial.print(",");
-  Serial.print(Coeff.a5); Serial.print(",");
-  Serial.print(PosFinal); Serial.print(",");
-  Serial.print(T); Serial.println();
+
+  /*
+    Serial.print(Coeff.a0); Serial.print(",");
+    Serial.print(Coeff.a1); Serial.print(",");
+    Serial.print(Coeff.a2, 5); Serial.print(",");
+    Serial.print(Coeff.a3,8); Serial.print(",");
+    Serial.print(Coeff.a4); Serial.print(",");
+    Serial.print(Coeff.a5); Serial.print(",");
+    Serial.print(PosFinal); Serial.print(",");
+    Serial.print(T); Serial.println();
   */
 }
 
@@ -313,16 +317,16 @@ void CubicTraj (state_t& des_state, polyCoef_t& Coeff, double t) {
   des_state.vel.y = 0.0;
   des_state.vel.z = 0.0;
 
-  des_state.acc.x = 0.0;
+  des_state.acc.x = 2 * Coeff.a2 + 6 * Coeff.a3 * t;
   des_state.acc.y = 0.0;
   des_state.acc.z = 0.0;
 
-/*
-  Serial.println();
-  Serial.print(des_state.pos.x, 8); Serial.print(",");
-  Serial.print(des_state.vel.x, 8); Serial.print(",");
-  Serial.print(t, 4); Serial.println();
-*/
+  /*
+    Serial.println();
+    Serial.print(des_state.pos.x, 8); Serial.print(",");
+    Serial.print(des_state.vel.x, 8); Serial.print(",");
+    Serial.print(t, 4); Serial.println();
+  */
 }
 
 void QuinticTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
@@ -342,4 +346,84 @@ void QuinticTraj (state_t& des_state, polyCoef_t& Coeff, unsigned t) {
   des_state.acc.y = 0.0;
   des_state.acc.z = 0.0;
 
+}
+
+void computeTendonLengths (state_t& tendon_len, state_t& desired_theta) {
+  /*
+     Note that theta_d is in degrees. Need to be converted to radians for these computations
+  */
+
+  //cm
+  double a1 = 5.076; double b1 = 5.076;
+  double a2 = 5.216; double b2 = 5.216;
+  double a3 = 4.252; double b3 = 4.252;
+
+  //mm
+  float d_1 = 18.94; float d_2 = 16.55; float d_3 = 15.80;
+
+  //cm
+  float r1 = d_1 / (2 * 10); float r2 = d_2 / (2 * 10); float r3 = d_3 / (2 * 10);
+
+  float RADIANS_TO_DEGREES = 180 / 3.14159;
+
+  double theta1 = desired_theta.pos.x / RADIANS_TO_DEGREES;
+  double theta2 = desired_theta.pos.y / RADIANS_TO_DEGREES;
+  double theta3 = desired_theta.pos.z / RADIANS_TO_DEGREES;
+
+  double q1 = sqrt(pow(a1, 2) + pow(b1, 2) + 2 * a1 * b1 * cos(PI - theta1)) +
+              sqrt(pow(a2, 2) + pow(b2, 2) + 2 * a2 * b2 * cos(PI - theta2)) +
+              sqrt(pow(a3, 2) + pow(b3, 2) + 2 * a3 * b3 * cos(PI - theta3));
+  double q2 = r1 * theta1 + r2 * theta2 + r3 * theta3;
+
+  tendon_len.pos.x = q1; //cm
+  tendon_len.pos.y = q2; //cm
+  tendon_len.pos.z = 0.0;
+}
+
+void computeTendonVelocity (state_t& tendon_vel, state_t& desired_theta) {
+
+  //cm
+  double a1 = 5.076; double b1 = 5.076;
+  double a2 = 5.216; double b2 = 5.216;
+  double a3 = 4.252; double b3 = 4.252;
+
+  //mm
+  float d_1 = 18.94; float d_2 = 16.55; float d_3 = 15.80;
+
+  //cm
+  float r1 = d_1 / (2 * 10); float r2 = d_2 / (2 * 10); float r3 = d_3 / (2 * 10);
+
+  float RADIANS_TO_DEGREES = 180 / 3.14159;
+
+  double theta1 = desired_theta.pos.x / RADIANS_TO_DEGREES;
+  double theta2 = desired_theta.pos.y / RADIANS_TO_DEGREES;
+  double theta3 = desired_theta.pos.z / RADIANS_TO_DEGREES;
+
+  double dtheta1 = desired_theta.vel.x / RADIANS_TO_DEGREES;
+  double dtheta2 = desired_theta.vel.y / RADIANS_TO_DEGREES;
+  double dtheta3 = desired_theta.vel.z / RADIANS_TO_DEGREES;
+
+  double h11 = a1 * b1 * sin(theta1) / sqrt(pow(a1, 2) + pow(b1, 2) + 2 * a1 * b1 * cos(PI - theta1));
+  double h12 = a2 * b2 * sin(theta2) / sqrt(pow(a2, 2) + pow(b2, 2) + 2 * a2 * b2 * cos(PI - theta2));
+  double h13 = a3 * b3 * sin(theta3) / sqrt(pow(a3, 2) + pow(b3, 2) + 2 * a3 * b3 * cos(PI - theta3));
+
+  const tmm::Scalar H_theta[2][3] = {
+    {h11, h12, h13},
+    {r1, r2, r3},
+  };
+  
+  tmm::Matrix<2, 3> H(H_theta);
+
+  tmm::Scalar dtheta_v[3][1] = {
+    {dtheta1},
+    {dtheta2},
+    {dtheta3}
+  };
+  tmm::Matrix<3, 1> dottheta(dtheta_v);
+
+  tmm::Matrix<2, 1> comp_tendon_vel = H * dottheta;
+
+  tendon_vel.pos.x = comp_tendon_vel[0][0]; //cm/s
+  tendon_vel.pos.y = comp_tendon_vel[1][0]; //cm/s
+  tendon_vel.pos.z = 0.0;
 }
