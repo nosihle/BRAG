@@ -370,9 +370,9 @@ void computeTendonLengths (state_t& tendon_len, state_t& desired_theta) {
   double theta2 = desired_theta.pos.y / RADIANS_TO_DEGREES;
   double theta3 = desired_theta.pos.z / RADIANS_TO_DEGREES;
 
-  double q1 = sqrt(pow(a1, 2) + pow(b1, 2) + 2 * a1 * b1 * cos(PI - theta1)) +
-              sqrt(pow(a2, 2) + pow(b2, 2) + 2 * a2 * b2 * cos(PI - theta2)) +
-              sqrt(pow(a3, 2) + pow(b3, 2) + 2 * a3 * b3 * cos(PI - theta3));
+  double q1 = sqrt(pow(a1, 2) + pow(b1, 2) - 2 * a1 * b1 * cos(PI - theta1)) +
+              sqrt(pow(a2, 2) + pow(b2, 2) - 2 * a2 * b2 * cos(PI - theta2)) +
+              sqrt(pow(a3, 2) + pow(b3, 2) - 2 * a3 * b3 * cos(PI - theta3));
   double q2 = r1 * theta1 + r2 * theta2 + r3 * theta3;
 
   tendon_len.pos.x = q1; //cm
@@ -403,9 +403,9 @@ void computeTendonVelocity (state_t& tendon_vel, state_t& desired_theta) {
   double dtheta2 = desired_theta.vel.y / RADIANS_TO_DEGREES;
   double dtheta3 = desired_theta.vel.z / RADIANS_TO_DEGREES;
 
-  double h11 = a1 * b1 * sin(theta1) / sqrt(pow(a1, 2) + pow(b1, 2) + 2 * a1 * b1 * cos(PI - theta1));
-  double h12 = a2 * b2 * sin(theta2) / sqrt(pow(a2, 2) + pow(b2, 2) + 2 * a2 * b2 * cos(PI - theta2));
-  double h13 = a3 * b3 * sin(theta3) / sqrt(pow(a3, 2) + pow(b3, 2) + 2 * a3 * b3 * cos(PI - theta3));
+  double h11 = -a1 * b1 * sin(theta1) / sqrt(pow(a1, 2) + pow(b1, 2) + 2 * a1 * b1 * cos(theta1));
+  double h12 = -a2 * b2 * sin(theta2) / sqrt(pow(a2, 2) + pow(b2, 2) + 2 * a2 * b2 * cos(theta2));
+  double h13 = -a3 * b3 * sin(theta3) / sqrt(pow(a3, 2) + pow(b3, 2) + 2 * a3 * b3 * cos(theta3));
 
   const tmm::Scalar H_theta[2][3] = {
     {h11, h12, h13},
