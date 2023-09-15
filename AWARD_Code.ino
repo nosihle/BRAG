@@ -324,7 +324,7 @@ void setup(void) {
   double motorRotSpeed_c2;
 
   // define PID control gains
-  float KP = 3.0;
+  float KP = 0.03;
   float KD = 0.5;
   float KI = 0.0;
 
@@ -335,10 +335,13 @@ void setup(void) {
   double E_IN_MAX = 10000;
   double u, vel_PD;
 
+  delay(5000);
+
   //Read sensor readings to get current pos
+  Serial.print(ticks.m3); Serial.println();
   getEncCounts(ticks, rots);
   getSensorData(sensorData);
-
+  Serial.print(ticks.m3); Serial.println();
   //should always be zero since it is incremental encoder.
   int motor_pos_1prev = ticks.m3;
   int motor_pos_2prev = ticks.m4;
@@ -346,8 +349,6 @@ void setup(void) {
   double endTime = currTime + 10; //run for 10 seconds
 
   while (currTime <= endTime ) {
-    //Update/compute desired_theta from desired_state
-
     //theta_d, dottheta_d has been computed/updated. h
     computeDesiredStates (theta_d, desired_state, COEFF, currTime); // currTime must be in seconds
 
@@ -357,29 +358,24 @@ void setup(void) {
 
     //convert pos_des to motor rotations
     rotsFromDisp_1 = dispToRots(tendon_len.pos.x, radius, Lt); // gives rotations
-    rotsFromDisp_2 = dispToRots(tendon_len.pos.y, radius, Lt); // gives rotations
+    rotsFromDisp_2 = dispToRots(tendon_len.pos.y, radius, Lt);
 
     motorRotSpeed_1 = rotSpeed (tendon_vel.pos.x, Lt, rotsFromDisp_1, radius); // gives motor rotational speed (radians/second)
-    motorRotSpeed_2 = rotSpeed (tendon_vel.pos.y, Lt, rotsFromDisp_2, radius); // gives motor rotational speed
-
+    motorRotSpeed_2 = rotSpeed (tendon_vel.pos.y, Lt, rotsFromDisp_2, radius);
     goalTicks_1 = rotsFromDisp_1 * CPR * GR;
     goalTicks_2 = rotsFromDisp_2 * CPR * GR;
-
-    refTicks_1 = motor_pos_1prev + goalTicks_1; // target position will be what was initially there
+    refTicks_1 = motor_pos_1prev + goalTicks_1; //target position will be what was initially there
     refTicks_2 = motor_pos_2prev + goalTicks_2;
 
     //desired motor speed and position have been computed, now update sensor info
-    //Read sensor readings to get current pos
     getEncCounts(ticks, rots);
     getSensorData(sensorData);
     nowTime = micros();
     nowTime_S = nowTime * 1e-6;
-
     deltaT = nowTime_S - currTime;
 
     motor_pos_1 = ticks.m3;
     motor_pos_2 = ticks.m4;
-
     motorRotSpeed_c1 = (2 * PI * ((motor_pos_1 / (CPR * GR)) - (motor_pos_1prev / (CPR * GR)))) / deltaT; // radians / seconds.
     motorRotSpeed_c2 = (2 * PI * ((motor_pos_2 / (CPR * GR)) - (motor_pos_2prev / (CPR * GR)))) / deltaT; // radians / seconds.
 
@@ -387,7 +383,7 @@ void setup(void) {
     err_m2 = (motor_pos_2 / (CPR * GR)) - rotsFromDisp_2;
     doterr_m1 = motorRotSpeed_c1 - motorRotSpeed_1;
     doterr_m2 =  motorRotSpeed_c1 - motorRotSpeed_2;
-    e_integral = e_integral + err_m1 * deltaT;
+    e_integral = e_integral + err_m2 * deltaT;
 
     //check to ensure that there is no antiwindup
     if (e_integral > E_IN_MAX) {
@@ -396,7 +392,7 @@ void setup(void) {
       e_integral = -1 * E_IN_MAX;
     }
 
-    u = KP * err_m1 + KI * e_integral + KD * (err_m1 / deltaT);
+    u = KP * err_m2;// + KI * e_integral + KD * (err_m2 / deltaT);
 
     // normalize to PWM using tanh
     vel_PD = tanh(u) * 255;
@@ -417,7 +413,6 @@ void setup(void) {
       FWD_Motors(m_FNT4, abs(vel_PD));
     }
 
-
     //  if (vel_PD < 50) { //minimum PWM to overcome friction
     //  vel_PD  = 50;
     // } else if (vel_PD > -1 * 50) {
@@ -426,7 +421,28 @@ void setup(void) {
 
     currTime = nowTime * 1e-6;
 
+    Serial.print(nowTime_S); Serial.print(",");
+    Serial.print(deltaT); Serial.print("\t");
+    Serial.print(rotsFromDisp_1); Serial.print(",");
+    Serial.print(rotsFromDisp_2); Serial.print(",");
+    Serial.print((motor_pos_1 / (CPR * GR))); Serial.print(",");
+    Serial.print((motor_pos_2 / (CPR * GR))); Serial.print(","); Serial.print("\t");
 
+    Serial.print(tendon_vel.pos.x); Serial.print(",");
+    Serial.print(tendon_vel.pos.y); Serial.print(",");
+    Serial.print(motorRotSpeed_c1); Serial.print(",");
+    Serial.print(motorRotSpeed_c2); Serial.print(","); Serial.print("\t");
+
+    Serial.print("\t");
+    Serial.print(rotsFromDisp_1); Serial.print(",");
+    Serial.print(rotsFromDisp_2); Serial.print(",");
+
+    Serial.print(err_m2); Serial.print(",");
+    Serial.print(doterr_m2); Serial.print(","); Serial.print("\t");
+    Serial.print(u); Serial.print(",");
+
+    Serial.print(vel_PD); Serial.print(",");
+    Serial.println();
     /*
 
           //positionControllerMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, targetTicks, deltaT, initPos) ; //follow this generated position
@@ -507,12 +523,11 @@ void setup(void) {
           velAcc3.pVel = velAcc3.pVel + vel_1_old;
           velAcc6.pVel = velAcc6.pVel + vel_1_old;
 
-
           computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G, m_FNT3, m_FNT4);
 
     */
   }
-
+  Serial.println("Finished Controller...");
   //reached desired position, so stop
   STOP_Motors(m_FNT3);
   STOP_Motors(m_FNT4);
