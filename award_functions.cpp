@@ -164,7 +164,8 @@ float RotsToDisp(float n, float radius, float Lt) {
     TODO: improve function so that radius and Lt are not inputs
   */
   float temp = 2 * PI * n;
-  float d = sqrt(Lt * Lt + temp * radius * temp * radius) - Lt;
+  float temp_1 = temp * radius;
+  float d = sqrt(pow(Lt, 2) + pow(temp_1, 2)) - Lt;
   return d;
 }
 
@@ -175,8 +176,8 @@ float dispToRots(float displ, float radius, float Lt) {
      public: float radius; float Lt;
     TODO: improve function such that radius and Lt are not inputs
   */
-  float numRots = sqrt(displ * displ + 2 * displ * Lt) / (2 * PI * radius);
-  return numRots; 
+  float numRots = sqrt(pow(displ, 2) + 2 * displ * Lt) / (2 * PI * radius);
+  return numRots;
 }
 
 float rotSpeed (float linSpeed, float Lt, float n, float radius) {
@@ -359,12 +360,12 @@ void computeTendonLengths (state_t& tendon_len, state_t& desired_theta) {
   double a3 = 4.252; double b3 = 4.252;
 
   //mm
-  float d_1 = 18.94; float d_2 = 16.55; float d_3 = 15.80;
+  double d_1 = 18.94; double d_2 = 16.55; double d_3 = 15.80;
 
   //cm
-  float r1 = d_1 / (2 * 10); float r2 = d_2 / (2 * 10); float r3 = d_3 / (2 * 10);
+  double r1 = d_1 / (2 * 10); double r2 = d_2 / (2 * 10); double r3 = d_3 / (2 * 10);
 
-  float RADIANS_TO_DEGREES = 180 / 3.14159;
+  double RADIANS_TO_DEGREES = 180.0 / 3.14159;
 
   double theta1 = desired_theta.pos.x / RADIANS_TO_DEGREES;
   double theta2 = desired_theta.pos.y / RADIANS_TO_DEGREES;
@@ -388,12 +389,12 @@ void computeTendonVelocity (state_t& tendon_vel, state_t& desired_theta) {
   double a3 = 4.252; double b3 = 4.252;
 
   //mm
-  float d_1 = 18.94; float d_2 = 16.55; float d_3 = 15.80;
+  double d_1 = 18.94; double d_2 = 16.55; double d_3 = 15.80;
 
   //cm
-  float r1 = d_1 / (2 * 10); float r2 = d_2 / (2 * 10); float r3 = d_3 / (2 * 10);
+  double r1 = d_1 / (2 * 10); double r2 = d_2 / (2 * 10); double r3 = d_3 / (2 * 10);
 
-  float RADIANS_TO_DEGREES = 180 / 3.14159;
+  double RADIANS_TO_DEGREES = 180.0 / 3.14159;
 
   double theta1 = desired_theta.pos.x / RADIANS_TO_DEGREES;
   double theta2 = desired_theta.pos.y / RADIANS_TO_DEGREES;
@@ -411,7 +412,7 @@ void computeTendonVelocity (state_t& tendon_vel, state_t& desired_theta) {
     {h11, h12, h13},
     {r1, r2, r3},
   };
-  
+
   tmm::Matrix<2, 3> H(H_theta);
 
   tmm::Scalar dtheta_v[3][1] = {
@@ -423,7 +424,7 @@ void computeTendonVelocity (state_t& tendon_vel, state_t& desired_theta) {
 
   tmm::Matrix<2, 1> comp_tendon_vel = H * dottheta;
 
-  tendon_vel.pos.x = comp_tendon_vel[0][0]; //cm/s
-  tendon_vel.pos.y = comp_tendon_vel[1][0]; //cm/s
-  tendon_vel.pos.z = 0.0;
+  tendon_vel.vel.x = comp_tendon_vel[0][0]; //cm/s
+  tendon_vel.vel.y = comp_tendon_vel[1][0]; //cm/s
+  tendon_vel.vel.z = 0.0;
 }

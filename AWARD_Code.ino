@@ -268,102 +268,104 @@ void setup(void) {
 
   t_dur = millis(); t_now = millis();
 
-
   //Computed Controll Implementation
 
   //initialize control variables
   polyCoef_t COEFF;
-  float PosInit = 0.0;
-  float PosFinal = 8.8;//cm
+  float PosInit = 40.0;
+  float PosFinal = 70.0;//cm
   float VelInit = 0.0;
   float VelFinal = 0.0;
   unsigned t_init = millis();
   float duration = 10; //seconds
-  unsigned t_final = t_init + duration * 1000;
+  unsigned t_final = t_init + (duration * 1000);
   //call function generator of choice, using cubic function for now, to compute coefficients
   CubicTrajCoeff (COEFF, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
 
-  //repeat this for a set duration
-  // initialize position, velocity and acceleration
-  float theta_0 = 0.0f; float theta_1 = 0.0f;
-  float theta_2 = 0.0f; float theta_3 = 0.0f;
+  /*
+    //repeat this for a set duration
+    // initialize position, velocity and acceleration
+    float theta_0 = 0.0f; float theta_1 = 0.0f;
+    float theta_2 = 0.0f; float theta_3 = 0.0f;
 
-  //initialize filtered angles
-  float theta_0f = 0.0f; float theta_1f = 0.0f;
-  float theta_2f = 0.0f; float theta_3f = 0.0f;
+    //initialize filtered angles
+    float theta_0f = 0.0f; float theta_1f = 0.0f;
+    float theta_2f = 0.0f; float theta_3f = 0.0f;
 
-  float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
-  float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
+    float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
+    float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
 
-  float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
-  float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
-  float vel_1_old = 0.0f; float vel_2_old = 0.0f; float vel_3_old = 0.0f; float vel_4_old = 0.0f;
+    float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
+    float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
+    float vel_1_old = 0.0f; float vel_2_old = 0.0f; float vel_3_old = 0.0f; float vel_4_old = 0.0f;
 
-  float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
-  float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
+    float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
+    float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
+  */
+
   unsigned long nowTime;
-  double nowTime_S;
-  double deltaT;
-  double timeChange;
+  double nowTime_S, deltaT, timeChange;
   double radius = 0.015; //cm
   double Lt = 16.5; //cm
-  state_t tendon_len; //Initialize q1 = 0,q2 = 0; No motor rotations
-  state_t tendon_vel;
+  state_t tendon_len, tendon_vel;
   int GR = 30.0f; int CPR = 12.0;
-  double rotsFromDisp_1;
-  double rotsFromDisp_2;
-  double motorRotSpeed_1;
-  double motorRotSpeed_2;
-  int long goalTicks_1;
-  int long goalTicks_2;
-  int long refTicks_1;
-  int long refTicks_2;
-  int motor_pos_1;
-  int motor_pos_2;
-  double motorRotSpeed_c1;
-  double motorRotSpeed_c2;
+  double targetRotsFromDisp_1, targetRotsFromDisp_2, targetMotorRotSpeed_1, targetMotorRotSpeed_2;
+  int long goalTicks_1, goalTicks_2, refTicks_1, refTicks_2;
+  int motor_pos_1, motor_pos_2;
+  double currentMotorRots_1, currentMotorRots_2, currentMotorRotSpeed_1, currentMotorRotSpeed_2;
 
   // define PID control gains
   float KP = 0.03;
-  float KD = 0.5;
-  float KI = 0.0;
+  float KD = 0.01;
+  float KI = 0.01;
 
-  int ER_MARGIN = 1000;
-  double err_m1, err_m2;
-  double doterr_m1, doterr_m2;
+  int ER_MARGIN = 1000; double E_IN_MAX = 10000;
+  double err_m1, err_m2, doterr_m1, doterr_m2;
   double e_integral = 0.0;
-  double E_IN_MAX = 10000;
   double u, vel_PD;
 
-  delay(5000);
-
+  //while (!Serial) {
   //Read sensor readings to get current pos
-  Serial.print(ticks.m3); Serial.println();
   getEncCounts(ticks, rots);
   getSensorData(sensorData);
-  Serial.print(ticks.m3); Serial.println();
+
   //should always be zero since it is incremental encoder.
   int motor_pos_1prev = ticks.m3;
   int motor_pos_2prev = ticks.m4;
+  double motor_rots_1prev = motor_pos_1prev / (CPR * GR); //rotations
+  double motor_rots_2prev = motor_pos_2prev / (CPR * GR);
+
+  double q1_0 = 0.0; double q2_0 = 0.0;
+  double contra_1 = 0.0; double contra_2 = 0.0;
+  double rotsTravelled_1, rotsTravelled_2;
+
   double currTime = micros() * 1e-6;
   double endTime = currTime + 10; //run for 10 seconds
 
   while (currTime <= endTime ) {
-    //theta_d, dottheta_d has been computed/updated. h
+    //theta_d (degrees), dottheta_d has been computed/updated.
     computeDesiredStates (theta_d, desired_state, COEFF, currTime); // currTime must be in seconds
 
     //Compute the q from theta_d, dotq from theta_d, dottheta
     computeTendonLengths (tendon_len, theta_d);
     computeTendonVelocity (tendon_vel, theta_d);
 
-    //convert pos_des to motor rotations
-    rotsFromDisp_1 = dispToRots(tendon_len.pos.x, radius, Lt); // gives rotations
-    rotsFromDisp_2 = dispToRots(tendon_len.pos.y, radius, Lt);
+    if (currTime < 0.8) { //get initial tendon value.
+      q1_0 = tendon_len.pos.x;
+      q2_0 = tendon_len.pos.y;
+    }
 
-    motorRotSpeed_1 = rotSpeed (tendon_vel.pos.x, Lt, rotsFromDisp_1, radius); // gives motor rotational speed (radians/second)
-    motorRotSpeed_2 = rotSpeed (tendon_vel.pos.y, Lt, rotsFromDisp_2, radius);
-    goalTicks_1 = rotsFromDisp_1 * CPR * GR;
-    goalTicks_2 = rotsFromDisp_2 * CPR * GR;
+    contra_1 = tendon_len.pos.x - q1_0;
+    contra_2 = tendon_len.pos.y - q2_0;
+
+    //convert pos_des to motor rotations
+    targetRotsFromDisp_1 = dispToRots(fabs(contra_1), radius, Lt); // gives rotations
+    targetRotsFromDisp_2 = dispToRots(fabs(contra_2), radius, Lt);
+
+    targetMotorRotSpeed_1 = rotSpeed (tendon_vel.vel.x, Lt, targetRotsFromDisp_1, radius); // gives motor rotational speed (radians/second)
+    targetMotorRotSpeed_2 = rotSpeed (tendon_vel.vel.y, Lt, targetRotsFromDisp_2, radius);
+    goalTicks_1 = targetRotsFromDisp_1 * CPR * GR;
+    goalTicks_2 = targetRotsFromDisp_2 * CPR * GR;
     refTicks_1 = motor_pos_1prev + goalTicks_1; //target position will be what was initially there
     refTicks_2 = motor_pos_2prev + goalTicks_2;
 
@@ -374,15 +376,21 @@ void setup(void) {
     nowTime_S = nowTime * 1e-6;
     deltaT = nowTime_S - currTime;
 
-    motor_pos_1 = ticks.m3;
-    motor_pos_2 = ticks.m4;
-    motorRotSpeed_c1 = (2 * PI * ((motor_pos_1 / (CPR * GR)) - (motor_pos_1prev / (CPR * GR)))) / deltaT; // radians / seconds.
-    motorRotSpeed_c2 = (2 * PI * ((motor_pos_2 / (CPR * GR)) - (motor_pos_2prev / (CPR * GR)))) / deltaT; // radians / seconds.
+    motor_pos_1 = ticks.m3; currentMotorRots_1 = motor_pos_1 / (CPR * GR);
+    motor_pos_2 = ticks.m4; currentMotorRots_2 = motor_pos_2 / (CPR * GR);
 
-    err_m1 = (motor_pos_1 / (CPR * GR)) - rotsFromDisp_1;
-    err_m2 = (motor_pos_2 / (CPR * GR)) - rotsFromDisp_2;
-    doterr_m1 = motorRotSpeed_c1 - motorRotSpeed_1;
-    doterr_m2 =  motorRotSpeed_c1 - motorRotSpeed_2;
+    rotsTravelled_1 = (currentMotorRots_1 - motor_rots_1prev);
+    rotsTravelled_2 = (currentMotorRots_2 - motor_rots_2prev);
+    currentMotorRotSpeed_1 = (2 * PI * rotsTravelled_1) / deltaT; // radians / seconds.
+    currentMotorRotSpeed_2 = (2 * PI * rotsTravelled_2) / deltaT;
+
+    motor_rots_1prev = currentMotorRots_1;
+    motor_rots_2prev = currentMotorRots_2;
+
+    err_m1 = currentMotorRots_1 - targetRotsFromDisp_1;
+    err_m2 = currentMotorRots_2 - targetRotsFromDisp_2;
+    doterr_m1 = currentMotorRotSpeed_1 - targetMotorRotSpeed_1;
+    doterr_m2 = currentMotorRotSpeed_2 - targetMotorRotSpeed_2;
     e_integral = e_integral + err_m2 * deltaT;
 
     //check to ensure that there is no antiwindup
@@ -392,7 +400,8 @@ void setup(void) {
       e_integral = -1 * E_IN_MAX;
     }
 
-    u = KP * err_m2;// + KI * e_integral + KD * (err_m2 / deltaT);
+    //u = KP * err_m2;// + KI * e_integral + KD * (err_m2 / deltaT);
+    u = KP * err_m2 + KI * e_integral + KD * (err_m2 / deltaT);
 
     // normalize to PWM using tanh
     vel_PD = tanh(u) * 255;
@@ -405,12 +414,12 @@ void setup(void) {
 
     //Drive motors in opposite directions
     if (sgn(vel_PD) > 0) {
-      FWD_Motors(m_FNT3, abs(vel_PD));
-      RVS_Motors(m_FNT4, abs(vel_PD));
+      RVS_Motors(m_FNT3, fabs(vel_PD));
+      FWD_Motors(m_FNT4, fabs(vel_PD));
     }
     else {
-      RVS_Motors(m_FNT3, abs(vel_PD));
-      FWD_Motors(m_FNT4, abs(vel_PD));
+      FWD_Motors(m_FNT3, fabs(vel_PD));
+      RVS_Motors(m_FNT4, fabs(vel_PD));
     }
 
     //  if (vel_PD < 50) { //minimum PWM to overcome friction
@@ -419,30 +428,35 @@ void setup(void) {
     //  vel_PD = -1 * 50;
     //}
 
+    //Update states
     currTime = nowTime * 1e-6;
 
     Serial.print(nowTime_S); Serial.print(",");
-    Serial.print(deltaT); Serial.print("\t");
-    Serial.print(rotsFromDisp_1); Serial.print(",");
-    Serial.print(rotsFromDisp_2); Serial.print(",");
-    Serial.print((motor_pos_1 / (CPR * GR))); Serial.print(",");
-    Serial.print((motor_pos_2 / (CPR * GR))); Serial.print(","); Serial.print("\t");
+    Serial.print(deltaT, 4); Serial.print(","); Serial.print("\t");
 
-    Serial.print(tendon_vel.pos.x); Serial.print(",");
-    Serial.print(tendon_vel.pos.y); Serial.print(",");
-    Serial.print(motorRotSpeed_c1); Serial.print(",");
-    Serial.print(motorRotSpeed_c2); Serial.print(","); Serial.print("\t");
+    Serial.print(targetRotsFromDisp_1); Serial.print(",");
+    Serial.print(targetRotsFromDisp_2); Serial.print(",");
+    Serial.print(contra_1, 4); Serial.print(",");
+    Serial.print(contra_2, 4); Serial.print(","); Serial.print("\t");
 
-    Serial.print("\t");
-    Serial.print(rotsFromDisp_1); Serial.print(",");
-    Serial.print(rotsFromDisp_2); Serial.print(",");
+    Serial.print(motor_rots_1prev); Serial.print(",");
+    Serial.print(currentMotorRots_1); Serial.print(",");
+    Serial.print(motor_rots_2prev); Serial.print(",");
+    Serial.print(currentMotorRots_2); Serial.print(",");
+    Serial.print(err_m2); Serial.print(","); Serial.print("\t");
 
-    Serial.print(err_m2); Serial.print(",");
+    Serial.print(rotsTravelled_1); Serial.print(",");
+    Serial.print(rotsTravelled_2); Serial.print(",");
+    Serial.print(currentMotorRotSpeed_1); Serial.print(",");
+    Serial.print(targetMotorRotSpeed_1); Serial.print(",");
+    Serial.print(currentMotorRotSpeed_2); Serial.print(",");
+    Serial.print(targetMotorRotSpeed_2); Serial.print(",");
     Serial.print(doterr_m2); Serial.print(","); Serial.print("\t");
-    Serial.print(u); Serial.print(",");
 
-    Serial.print(vel_PD); Serial.print(",");
+    Serial.print(u, 3); Serial.print(",");
+    Serial.print(vel_PD, 3); Serial.print(",");
     Serial.println();
+
     /*
 
           //positionControllerMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, targetTicks, deltaT, initPos) ; //follow this generated position
@@ -524,20 +538,19 @@ void setup(void) {
           velAcc6.pVel = velAcc6.pVel + vel_1_old;
 
           computedTorqueController (state_pos, state_vel, theta_d, tau_comp, M, C, B, G, m_FNT3, m_FNT4);
-
     */
   }
-  Serial.println("Finished Controller...");
+  Serial.print("Finished Controller..."); Serial.print("Stopping Motors."); Serial.println();
   //reached desired position, so stop
   STOP_Motors(m_FNT3);
   STOP_Motors(m_FNT4);
-
 
   // control
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
 
 }
+//}
 
 void loop(void) {
   butControl(pinNum); //CW for top motor (undo from 1 pos)
@@ -549,7 +562,6 @@ void loop(void) {
 
         readIMUData(lsm6ds33, 5, accel1, gyro1, temp1);
         readIMUData(lsm6ds33, 8, accel2, gyro2, temp2);
-
         computeFingerAngleCF(accel1, gyro1, anglesOld1, BiasIMU1);
         computeFingerAngleCF(accel2, gyro2, anglesOld2, BiasIMU2);
 
@@ -1026,23 +1038,23 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     if (initPos == 0) {//finger is starting at the folded state
       if (abs(Err_m) > ER_MARGIN) { //may have overshot target
         if (sgn(Err_m) > 0) { //err was increasing, hence overshot, reverse
-          FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m2, fabs(vel_PD)); //motors move opposite each other
+          RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
         }
         else {//err was negative, continue
-          RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m2, fabs(vel_PD)); //motors move opposite each other
+          FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
         }
       }
 
       if (abs(Err_m) < ER_MARGIN) { //may not have reached target
         if (sgn(Err_m) > 0) { // err was positive, increasing -- continue
-          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
-          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
+          FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
         }
         else { //err was negative reverse
-          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
-          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
+          RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
         }
       }
     }
@@ -1050,23 +1062,23 @@ void trackingControlMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ_BI
     if (initPos == 1) { // finger is starting at the straight configuration
       if (abs(Err_m) > ER_MARGIN) { //may have overshot target
         if (sgn(Err_m) > 0) { //err was increasing, hence overshot, reverse
-          FWD_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m1, fabs(vel_PD)); //motors move opposite each other
+          RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
         }
         else {//err was negative, continue
-          RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m1, fabs(vel_PD)); //motors move opposite each other
+          FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
         }
       }
 
       if (abs(Err_m) < ER_MARGIN) { //may not have reached target
         if (sgn(Err_m) > 0) { // err was positive, increasing -- continue
-          RVS_Motors(MJ_BIN_m1, abs(vel_PD));
-          FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+          RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
+          FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
         }
         else { //err was negative reverse
-          FWD_Motors(MJ_BIN_m1, abs(vel_PD));
-          RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+          FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
+          RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
         }
       }
     }
@@ -1376,11 +1388,11 @@ void trackingControl1(Encoder motor, int MJ_BIN[], float targetTicks) { //lookin
     float vel_PD = tanh(temp_command1) * 255;
 
     if (Err_m > ER_MARGIN) { //overshot target, reverse
-      RVS_Motors(MJ_BIN, abs(vel_PD)); //200
+      RVS_Motors(MJ_BIN, fabs(vel_PD)); //200
     }
 
     if (Err_m < ER_MARGIN) { //havent reached target, continue
-      FWD_Motors(MJ_BIN, abs(vel_PD)); //200
+      FWD_Motors(MJ_BIN, fabs(vel_PD)); //200
     }
     Err_m = motor.read() - targetTicks; //update error
   }
@@ -1415,24 +1427,24 @@ void forceControlPD(FsrScpData_t& sensData, float target_force, int MJ_BIN1[],
     float command_bck = (1 + tanh(temp_command1)) * motorSpeed2;
 
     // check if motor is running at max PWM
-    if (motorSpeed1 == 255.0f || abs(command_frt) > 255.0f) {
+    if (motorSpeed1 == 255.0f || fabs(command_frt) > 255.0f) {
       command_frt = 255 * sgn(command_frt);
     }
-    if (motorSpeed2 == 255.0f || abs(command_bck) > 255.0f) {
+    if (motorSpeed2 == 255.0f || fabs(command_bck) > 255.0f) {
       command_bck = 255 * sgn(command_bck);
     }
 
     //drive motors at computed speeds
     if (sgn(command_frt) == 1) {
-      FWD_Motors(MJ_BIN1, abs(command_frt));
+      FWD_Motors(MJ_BIN1, fabs(command_frt));
     } else {
-      RVS_Motors(MJ_BIN1, abs(command_frt));
+      RVS_Motors(MJ_BIN1, fabs(command_frt));
     }
 
     if (sgn(command_bck) == 1) {
-      FWD_Motors(MJ_BIN2, abs(command_bck));
+      FWD_Motors(MJ_BIN2, fabs(command_bck));
     } else {
-      RVS_Motors(MJ_BIN2, abs(command_bck));
+      RVS_Motors(MJ_BIN2, fabs(command_bck));
     }
 
     getSensorData(sensData);
@@ -1655,13 +1667,13 @@ void computedTorqueController (double state_pos[3], double state_vel[3], state_t
   */
 
   if (torque_cmd > ER_MARGIN) { //may have overshot target
-    FWD_Motors(MJ_BIN_m2, abs(torque_cmd)); //motors move opposite each other
-    RVS_Motors(MJ_BIN_m1, abs(torque_cmd));
+    FWD_Motors(MJ_BIN_m2, fabs(torque_cmd)); //motors move opposite each other
+    RVS_Motors(MJ_BIN_m1, fabs(torque_cmd));
   }
 
   if (torque_cmd < ER_MARGIN) { //may not have reached target
-    RVS_Motors(MJ_BIN_m2, abs(torque_cmd));
-    FWD_Motors(MJ_BIN_m1, abs(torque_cmd));
+    RVS_Motors(MJ_BIN_m2, fabs(torque_cmd));
+    FWD_Motors(MJ_BIN_m1, fabs(torque_cmd));
   }
 
   /*
@@ -1729,14 +1741,17 @@ void computeDesiredStates (state_t& desired_theta, state_t& des_state, polyCoef_
   //compute desired state using the computed coefficients
   CubicTraj (des_state, Coeff, currTime); //return theta_total desired
 
+  //Units of pos are degrees
   desired_theta.pos.x = 0.6443 * des_state.pos.x - 23.9184;
   desired_theta.pos.y = -0.0152 * des_state.pos.x + 11.3561;
   desired_theta.pos.z = 0.3709 * des_state.pos.x + 12.5623;
 
+  //Units of vel are degrees/second
   desired_theta.vel.x = 0.6443 * des_state.vel.x;
   desired_theta.vel.y = -0.0152 * des_state.vel.x;
   desired_theta.vel.z = 0.3709 * des_state.vel.x;
 
+  //Units of vel are degrees/second*second
   desired_theta.acc.x = 0.6443 * des_state.acc.x;
   desired_theta.acc.y = -0.0152 * des_state.acc.x;
   desired_theta.acc.z = 0.3709 * des_state.acc.x;
@@ -1814,23 +1829,23 @@ void velocityControllerMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ
   if (initPos == 0) {//finger is starting at the folded state
     if (abs(err_m1) > ER_MARGIN) { //may have overshot target
       if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
       else {//err was negative, continue
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
     }
 
     if (abs(err_m1) < ER_MARGIN) { //may not have reached target
       if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
       else { //err was negative reverse
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
     }
   }
@@ -1838,23 +1853,23 @@ void velocityControllerMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ
   if (initPos == 1) { // finger is starting at the straight configuration
     if (abs(err_m1) > ER_MARGIN) { //may have overshot target
       if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
       else {//err was negative, continue
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
     }
 
     if (abs(err_m1) < ER_MARGIN) { //may not have reached target
       if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
       else { //err was negative reverse
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
     }
   }
@@ -1918,23 +1933,23 @@ void positionControllerMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ
   if (initPos == 0) {//finger is starting at the folded state
     if (abs(err_m1) > ER_MARGIN) { //may have overshot target
       if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
       else {//err was negative, continue
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD)); //motors move opposite each other
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
     }
 
     if (abs(err_m1) < ER_MARGIN) { //may not have reached target
       if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
       else { //err was negative reverse
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
       }
     }
   }
@@ -1942,23 +1957,23 @@ void positionControllerMM(long m1_ticks, long m2_ticks, int MJ_BIN_m1[2], int MJ
   if (initPos == 1) { // finger is starting at the straight configuration
     if (abs(err_m1) > ER_MARGIN) { //may have overshot target
       if (sgn(err_m1) > 0) { //err was increasing, hence overshot, reverse
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD)); //motors move opposite each other
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
       else {//err was negative, continue
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD)); //motors move opposite each other
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD)); //motors move opposite each other
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
     }
 
     if (abs(err_m1) < ER_MARGIN) { //may not have reached target
       if (sgn(err_m1) > 0) { // err was positive, increasing -- continue
-        RVS_Motors(MJ_BIN_m1, abs(vel_PD));
-        FWD_Motors(MJ_BIN_m2, abs(vel_PD));
+        RVS_Motors(MJ_BIN_m1, fabs(vel_PD));
+        FWD_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
       else { //err was negative reverse
-        FWD_Motors(MJ_BIN_m1, abs(vel_PD));
-        RVS_Motors(MJ_BIN_m2, abs(vel_PD));
+        FWD_Motors(MJ_BIN_m1, fabs(vel_PD));
+        RVS_Motors(MJ_BIN_m2, fabs(vel_PD));
       }
     }
   }
