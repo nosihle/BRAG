@@ -121,6 +121,8 @@ void readIMUData(Adafruit_LSM6DS33 lsm6ds33, int , sensors_event_t& , sensors_ev
 void switchMux(int );
 void FWD_Motors(int MJ_BIN[], double);
 void RVS_Motors(int MJ_BIN[], double);
+void FWD_MotorsV2(int MJ_BIN[], double);
+void RVS_MotorsV2(int MJ_BIN[], double);
 void STOP_Motors(int MJ_BIN[]);
 void BRK_Motors(int MJ_BIN[]);
 float TsaDisp(float, float, float);
