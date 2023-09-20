@@ -118,7 +118,17 @@ void FWD_Motors(int MJ_BIN[], double vel) {
     analogWrite(MJ_BIN[2 * i], vel);
     analogWrite(MJ_BIN[2 * i + 1], 0);
   }
+} 
+
+void FWD_MotorsV2(int MJ_BIN[], double vel) {
+  /*
+     Functions drives motors forward
+     MJ_BIN is 1x2 array containing PWM pins
+  */
+    analogWrite(MJ_BIN[0], vel);
+    analogWrite(MJ_BIN[1], 0);
 }
+
 
 void RVS_Motors(int MJ_BIN[], double vel) {
   /*
@@ -131,6 +141,19 @@ void RVS_Motors(int MJ_BIN[], double vel) {
     analogWrite(MJ_BIN[2 * i + 1], vel);
   }
 }
+
+void RVS_MotorsV2(int MJ_BIN[], double vel) {
+  /*
+     Drives motors in reverse.
+     MJ_BIN is a 1x2 array of the Motor Direction pins
+     vel is the desired PWM for the motors
+  */
+ 
+    analogWrite(MJ_BIN[0], 0);
+    analogWrite(MJ_BIN[1], vel);
+}
+
+
 
 void STOP_Motors(int MJ_BIN[]) {
   /*
