@@ -308,21 +308,21 @@ void setup(void) {
   double radius = 0.015; //cm
   double Lt = 16.5; //cm
   state_t tendon_len, tendon_vel;
-  int GR = 30.0f; int CPR = 12.0;
+  double GR = 30.0f; double CPR = 12.0;
   double targetRotsFromDisp_1, targetRotsFromDisp_2, targetMotorRotSpeed_1, targetMotorRotSpeed_2;
   int long goalTicks_1, goalTicks_2, refTicks_1, refTicks_2;
   int motor_pos_1, motor_pos_2;
   double currentMotorRots_1, currentMotorRots_2, currentMotorRotSpeed_1, currentMotorRotSpeed_2;
 
   // define PID control gains
-  float KP = 0.03;
+  float KP = 0.03; //0.02
   float KD = 0.01;
   float KI = 0.01;
 
   int ER_MARGIN = 1000; double E_IN_MAX = 10000;
-  double err_m1, err_m2, doterr_m1, doterr_m2;
-  double e_integral = 0.0;
-  double u, vel_PD;
+  double err_m1, err_m2, Err_m, doterr_m1, doterr_m2;
+  double e_integral = 0.0; double e_integral_1 = 0.0; double e_integral_m = 0.0;
+  double u, u1, U, vel_PD0, vel_PD_1, vel_COM;
 
   //while (!Serial) {
   //Read sensor readings to get current pos
@@ -391,6 +391,15 @@ void setup(void) {
     err_m2 = currentMotorRots_2 - targetRotsFromDisp_2;
     doterr_m1 = currentMotorRotSpeed_1 - targetMotorRotSpeed_1;
     doterr_m2 = currentMotorRotSpeed_2 - targetMotorRotSpeed_2;
+
+    if (abs(err_m1) > abs(err_m2)) {
+      Err_m = err_m1;
+      e_integral_m = e_integral_m + err_m1 * deltaT;
+    } else {
+      Err_m = err_m2;
+      e_integral_m = e_integral_m + err_m2 * deltaT;
+    }
+    e_integral_1 = e_integral_1 + err_m1 * deltaT;
     e_integral = e_integral + err_m2 * deltaT;
 
     //check to ensure that there is no antiwindup
@@ -400,33 +409,89 @@ void setup(void) {
       e_integral = -1 * E_IN_MAX;
     }
 
+    if (e_integral_1 > E_IN_MAX) {
+      e_integral_1 = E_IN_MAX;
+    } else if (e_integral_1 < -1 * E_IN_MAX) {
+      e_integral_1 = -1 * E_IN_MAX;
+    }
+
+    if (e_integral_m > E_IN_MAX) {
+      e_integral_m = E_IN_MAX;
+    } else if (e_integral_m < -1 * E_IN_MAX) {
+      e_integral_m = -1 * E_IN_MAX;
+    }
+
     //u = KP * err_m2;// + KI * e_integral + KD * (err_m2 / deltaT);
+    u1 = KP * err_m1 + KI * e_integral_1 + KD * (err_m1 / deltaT);
     u = KP * err_m2 + KI * e_integral + KD * (err_m2 / deltaT);
+    U = KP * Err_m + KI * e_integral_m + KD * (Err_m / deltaT);
 
     // normalize to PWM using tanh
-    vel_PD = tanh(u) * 255;
+    vel_PD0 = tanh(u) * 255;
+    vel_PD_1 = tanh(u1) * 255;
+    vel_COM = tanh(U) * 255;
 
-    if (vel_PD > 255) { //Check for saturation
-      vel_PD = 255;
-    } else if (vel_PD < -1 * 255) {
-      vel_PD = -1 * 255;
+    if (vel_PD0 > 255) { //Check for saturation
+      vel_PD0 = 255;
+    } else if (vel_PD0 < -1 * 255) {
+      vel_PD0 = -1 * 255;
+    }
+
+    if (vel_PD_1 > 255) { //Check for saturation
+      vel_PD_1 = 255;
+    } else if (vel_PD_1 < -1 * 255) {
+      vel_PD_1 = -1 * 255;
+    }
+
+    if (vel_COM > 255) { //Check for saturation
+      vel_COM = 255;
+    } else if (vel_COM < -1 * 255) {
+      vel_COM = -1 * 255;
     }
 
     //Drive motors in opposite directions
+    /*
     if (sgn(vel_PD) > 0) {
       RVS_Motors(m_FNT3, fabs(vel_PD));
       FWD_Motors(m_FNT4, fabs(vel_PD));
-    }
-    else {
+      }
+      else {
       FWD_Motors(m_FNT3, fabs(vel_PD));
       RVS_Motors(m_FNT4, fabs(vel_PD));
+      }
+      */
+/*
+    if (sgn(vel_COM) > 0) {
+      RVS_Motors(m_FNT3, fabs(vel_COM));
+      FWD_Motors(m_FNT4, fabs(vel_COM));
     }
+    else {
+      FWD_Motors(m_FNT3, fabs(vel_COM));
+      RVS_Motors(m_FNT4, fabs(vel_COM));
+    } */
+
+
+      if (sgn(vel_PD0) > 0) {
+      FWD_MotorsV2(m_FNT4, fabs(vel_PD0));
+      }
+      else {
+      RVS_MotorsV2(m_FNT4, fabs(vel_PD0));
+      } 
+    
+      if (sgn(vel_PD_1) < 0) {
+      FWD_MotorsV2(m_FNT3, fabs(vel_PD_1));
+      }
+      else {
+      RVS_MotorsV2(m_FNT3, fabs(vel_PD_1));
+      }
 
     //  if (vel_PD < 50) { //minimum PWM to overcome friction
     //  vel_PD  = 50;
     // } else if (vel_PD > -1 * 50) {
     //  vel_PD = -1 * 50;
     //}
+
+    
 
     //Update states
     currTime = nowTime * 1e-6;
@@ -454,7 +519,11 @@ void setup(void) {
     Serial.print(doterr_m2); Serial.print(","); Serial.print("\t");
 
     Serial.print(u, 3); Serial.print(",");
-    Serial.print(vel_PD, 3); Serial.print(",");
+    Serial.print(vel_PD0, 3); Serial.print(",");
+    Serial.print(u1, 3); Serial.print(",");
+    Serial.print(vel_PD_1, 3); Serial.print(",");
+    Serial.print(U, 3); Serial.print(",");
+    Serial.print(vel_COM, 3); Serial.print(",");
     Serial.println();
 
     /*
@@ -542,9 +611,10 @@ void setup(void) {
   }
   Serial.print("Finished Controller..."); Serial.print("Stopping Motors."); Serial.println();
   //reached desired position, so stop
+  
   STOP_Motors(m_FNT3);
   STOP_Motors(m_FNT4);
-
+  
   // control
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
@@ -955,7 +1025,7 @@ void tsaPosControl(float travelGoal, float radius, float L0, int MJ_BIN_m1[], in
 
   //compute the rotations needed to meet desired travel
   float needRots = dispToRots(travelGoal, radius, L0);  //RotsToDisp(n, radius, L0)
-  int GR = 30.0f; int CPR = 12.0;
+  double GR = 30.0f; double CPR = 12.0;
   long int targetTicks = needRots * CPR * GR;
   //position control using the computed rotations
   trackingControlMM(ticks.m3, ticks.m4, MJ_BIN_m1, MJ_BIN_m2, targetTicks, duration, fingJoints, initPos);
