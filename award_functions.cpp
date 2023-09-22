@@ -199,15 +199,15 @@ float dispToRots(float displ, float radius, float Lt) {
      public: float radius; float Lt;
     TODO: improve function such that radius and Lt are not inputs
   */
-  float numRots = sqrt(pow(displ, 2) + 2 * displ * Lt) / (2 * PI * radius);
-  return numRots;
+  float numRots = sqrt(pow(fabs(displ), 2) + 2 * fabs(displ) * Lt) / (2 * PI * radius);
+  return sgn(displ)*numRots;
 }
 
 float rotSpeed (float linSpeed, float Lt, float n, float radius) {
   /*
      This function computes the rotational speed in rad/s, given that Lt,
-     radius are in the same units (cm / m) and linSpeed is also in corresponding units
-     cm/s or m/s
+     radius are the same units (cm or m) and linSpeed is also in corresponding units
+     (cm/s or m/s)
   */
   float theta = 2 * PI * n; // radians
   return linSpeed * sqrt(pow(Lt, 2) + pow(theta * radius, 2)) / (theta * pow(radius, 2)); //radians/second
