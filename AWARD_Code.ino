@@ -282,26 +282,24 @@ void setup(void) {
   //call function generator of choice, using cubic function for now, to compute coefficients
   CubicTrajCoeff (COEFF, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
 
-  /*
-    //repeat this for a set duration
-    // initialize position, velocity and acceleration
-    float theta_0 = 0.0f; float theta_1 = 0.0f;
-    float theta_2 = 0.0f; float theta_3 = 0.0f;
+  //repeat this for a set duration
+  // initialize position, velocity and acceleration
+  float theta_0 = 0.0f; float theta_1 = 0.0f;
+  float theta_2 = 0.0f; float theta_3 = 0.0f;
 
-    //initialize filtered angles
-    float theta_0f = 0.0f; float theta_1f = 0.0f;
-    float theta_2f = 0.0f; float theta_3f = 0.0f;
+  //initialize filtered angles
+  float theta_0f = 0.0f; float theta_1f = 0.0f;
+  float theta_2f = 0.0f; float theta_3f = 0.0f;
 
-    float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
-    float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
+  float angl_1 = 0.0f; float angl_2 = 0.0f; float angl_3 = 0.0f;
+  float angl_1_old = 0.0f; float angl_2_old = 0.0f; float angl_3_old = 0.0f;
 
-    float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
-    float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
-    float vel_1_old = 0.0f; float vel_2_old = 0.0f; float vel_3_old = 0.0f; float vel_4_old = 0.0f;
+  float dot_angl_1 = 0.0f; float dot_angl_2 = 0.0f; float dot_angl_3 = 0.0f;
+  float dot_angl_1_old = 0.0f; float dot_angl_2_old = 0.0f; float dot_angl_3_old = 0.0f;
+  float vel_1_old = 0.0f; float vel_2_old = 0.0f; float vel_3_old = 0.0f; float vel_4_old = 0.0f;
 
-    float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
-    float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
-  */
+  float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
+  float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
 
   unsigned long nowTime;
   double nowTime_S, deltaT, timeChange;
@@ -359,10 +357,10 @@ void setup(void) {
     contra_2 = tendon_len.pos.y - q2_0;
 
     //convert pos_des to motor rotations
-    targetRotsFromDisp_1 = dispToRots(fabs(contra_1), radius, Lt); // gives rotations
-    targetRotsFromDisp_2 = dispToRots(fabs(contra_2), radius, Lt);
+    targetRotsFromDisp_1 = dispToRots(contra_1, radius, Lt); // gives rotations
+    targetRotsFromDisp_2 = dispToRots(contra_2, radius, Lt);
 
-    targetMotorRotSpeed_1 = rotSpeed (tendon_vel.vel.x, Lt, targetRotsFromDisp_1, radius); // gives motor rotational speed (radians/second)
+    targetMotorRotSpeed_1 = rotSpeed (tendon_vel.vel.x, Lt, fabs(targetRotsFromDisp_1), radius); // gives motor rotational speed (radians/second)
     targetMotorRotSpeed_2 = rotSpeed (tendon_vel.vel.y, Lt, targetRotsFromDisp_2, radius);
     goalTicks_1 = targetRotsFromDisp_1 * CPR * GR;
     goalTicks_2 = targetRotsFromDisp_2 * CPR * GR;
@@ -372,6 +370,32 @@ void setup(void) {
     //desired motor speed and position have been computed, now update sensor info
     getEncCounts(ticks, rots);
     getSensorData(sensorData);
+
+    //----------------------
+    // read sensor data
+    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+
+    //compute angles using updated sensor info
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
+
+    //get needed angles and compute derivatives
+    theta_0 = anglesNew1.aX + 180;
+    theta_1 = anglesNew2.aX + 180;
+    theta_2 = anglesNew3.aX + 180;
+    theta_3 = anglesNew6.aX + 180;
+
+    //compute joint angles
+    fingState.pos.x = theta_1 - theta_0;
+    fingState.pos.y = theta_2 - theta_1;
+    fingState.pos.z = theta_3 - theta_2;
+
+    //---------------
     nowTime = micros();
     nowTime_S = nowTime * 1e-6;
     deltaT = nowTime_S - currTime;
@@ -384,8 +408,49 @@ void setup(void) {
     currentMotorRotSpeed_1 = (2 * PI * rotsTravelled_1) / deltaT; // radians / seconds.
     currentMotorRotSpeed_2 = (2 * PI * rotsTravelled_2) / deltaT;
 
+    dot_angl_1 = (fingState.pos.x - angl_1_old) / deltaT;
+    dot_angl_2 = (fingState.pos.y - angl_2_old) / deltaT;
+    dot_angl_3 = (fingState.pos.z - angl_3_old) / deltaT;
+
+    fingState.vel.x = 0.8 * dot_angl_1_old + 0.0155 * dot_angl_1;
+    fingState.vel.y = 0.8 * dot_angl_2_old + 0.0155 * dot_angl_2;
+    fingState.vel.z = 0.8 * dot_angl_3_old + 0.0155 * dot_angl_3;
+
+    dDot_angl_1 = (fingState.vel.x - dot_angl_1_old) / deltaT;
+    dDot_angl_2 = (fingState.vel.y - dot_angl_2_old) / deltaT;
+    dDot_angl_3 = (fingState.vel.z - dot_angl_3_old) / deltaT;
+
+    fingState.acc.x = 0.8 * dDot_angl_1_old + 0.0155 * dDot_angl_1;
+    fingState.acc.y = 0.8 * dDot_angl_2_old + 0.0155 * dDot_angl_2;
+    fingState.acc.z = 0.8 * dDot_angl_3_old + 0.0155 * dDot_angl_3;
+
+    velAcc1.pVel = velAcc1.pVel + vel_1_old;
+    velAcc2.pVel = velAcc2.pVel + vel_1_old;
+    velAcc3.pVel = velAcc3.pVel + vel_1_old;
+    velAcc6.pVel = velAcc6.pVel + vel_1_old;
+
     motor_rots_1prev = currentMotorRots_1;
     motor_rots_2prev = currentMotorRots_2;
+
+    //keep data from previous set.
+    angl_1_old = fingState.pos.x;
+    angl_2_old = fingState.pos.y;
+    angl_3_old = fingState.pos.z;
+
+    dot_angl_1_old = fingState.vel.x;
+    dot_angl_2_old = fingState.vel.y;
+    dot_angl_3_old = fingState.vel.z;
+
+    dDot_angl_1_old = fingState.acc.x;
+    dDot_angl_2_old = fingState.acc.y;
+    dDot_angl_3_old = fingState.acc.z;
+
+    vel_1_old = velAcc1.pVel;
+    vel_2_old = velAcc2.pVel;
+    vel_3_old = velAcc3.pVel;
+    vel_4_old = velAcc6.pVel;
+
+    //
 
     err_m1 = currentMotorRots_1 - targetRotsFromDisp_1;
     err_m2 = currentMotorRots_2 - targetRotsFromDisp_2;
@@ -451,7 +516,7 @@ void setup(void) {
 
     //Drive motors in opposite directions
     /*
-    if (sgn(vel_PD) > 0) {
+      if (sgn(vel_PD) > 0) {
       RVS_Motors(m_FNT3, fabs(vel_PD));
       FWD_Motors(m_FNT4, fabs(vel_PD));
       }
@@ -459,31 +524,31 @@ void setup(void) {
       FWD_Motors(m_FNT3, fabs(vel_PD));
       RVS_Motors(m_FNT4, fabs(vel_PD));
       }
-      */
-/*
-    if (sgn(vel_COM) > 0) {
-      RVS_Motors(m_FNT3, fabs(vel_COM));
-      FWD_Motors(m_FNT4, fabs(vel_COM));
+    */
+    /*
+        if (sgn(vel_COM) > 0) {
+          RVS_Motors(m_FNT3, fabs(vel_COM));
+          FWD_Motors(m_FNT4, fabs(vel_COM));
+        }
+        else {
+          FWD_Motors(m_FNT3, fabs(vel_COM));
+          RVS_Motors(m_FNT4, fabs(vel_COM));
+        } */
+
+
+    if (sgn(vel_PD0) > 0) {
+      FWD_MotorsV2(m_FNT4, fabs(vel_PD0));
     }
     else {
-      FWD_Motors(m_FNT3, fabs(vel_COM));
-      RVS_Motors(m_FNT4, fabs(vel_COM));
-    } */
-
-
-      if (sgn(vel_PD0) > 0) {
-      FWD_MotorsV2(m_FNT4, fabs(vel_PD0));
-      }
-      else {
       RVS_MotorsV2(m_FNT4, fabs(vel_PD0));
-      } 
-    
-      if (sgn(vel_PD_1) < 0) {
+    }
+
+    if (sgn(vel_PD_1) < 0) {
       FWD_MotorsV2(m_FNT3, fabs(vel_PD_1));
-      }
-      else {
+    }
+    else {
       RVS_MotorsV2(m_FNT3, fabs(vel_PD_1));
-      }
+    }
 
     //  if (vel_PD < 50) { //minimum PWM to overcome friction
     //  vel_PD  = 50;
@@ -491,16 +556,16 @@ void setup(void) {
     //  vel_PD = -1 * 50;
     //}
 
-    
-
     //Update states
     currTime = nowTime * 1e-6;
 
     Serial.print(nowTime_S); Serial.print(",");
     Serial.print(deltaT, 4); Serial.print(","); Serial.print("\t");
-
+    
     Serial.print(targetRotsFromDisp_1); Serial.print(",");
     Serial.print(targetRotsFromDisp_2); Serial.print(",");
+    Serial.print(q1_0, 3); Serial.print(",");
+    Serial.print(q2_0, 3); Serial.print(",");
     Serial.print(contra_1, 4); Serial.print(",");
     Serial.print(contra_2, 4); Serial.print(","); Serial.print("\t");
 
@@ -523,7 +588,30 @@ void setup(void) {
     Serial.print(u1, 3); Serial.print(",");
     Serial.print(vel_PD_1, 3); Serial.print(",");
     Serial.print(U, 3); Serial.print(",");
-    Serial.print(vel_COM, 3); Serial.print(",");
+    Serial.print(vel_COM, 3); Serial.print(","); Serial.print("\t");
+
+    Serial.print(theta_0); Serial.print(",");
+    Serial.print(theta_1); Serial.print(",");
+    Serial.print(theta_2); Serial.print(",");
+    Serial.print(theta_3); Serial.print(",");
+
+    Serial.print(fingState.pos.x); Serial.print(",");
+    Serial.print(fingState.pos.y); Serial.print(",");
+    Serial.print(fingState.pos.z); Serial.print(",");
+
+    Serial.print(fingState.vel.x); Serial.print(",");
+    Serial.print(fingState.vel.y); Serial.print(",");
+    Serial.print(fingState.vel.z); Serial.print(",");
+
+    Serial.print(fingState.acc.x); Serial.print(",");
+    Serial.print(fingState.acc.y); Serial.print(",");
+    Serial.print(fingState.acc.z); Serial.print(","); 
+
+    Serial.print(sensorData.amps1); Serial.print(","); //raw current values
+    Serial.print(sensorData.amps2); Serial.print(","); //raw current values
+    Serial.print(sensorData.amps3, 5); Serial.print(","); //current values
+    Serial.print(sensorData.amps4, 5); Serial.print(","); //current values
+    
     Serial.println();
 
     /*
@@ -611,10 +699,10 @@ void setup(void) {
   }
   Serial.print("Finished Controller..."); Serial.print("Stopping Motors."); Serial.println();
   //reached desired position, so stop
-  
+
   STOP_Motors(m_FNT3);
   STOP_Motors(m_FNT4);
-  
+
   // control
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, goalTicks, t_dur, fingState, posFingr);
   //trackingControlMM(ticks.m3, ticks.m4, m_FNT3, m_FNT4, 0, t_dur, fingState, posFingr);
@@ -964,20 +1052,20 @@ void getEncCounts(EncderCounts_t& mTicks, encRevs_t& mRots) {
 
 void getSensorData(FsrScpData_t& data) { // Read the data from the ADS 1115.
 
-  float Viout = 0.245 * 1000; // mV Zero current Output Voltage
-  float SCALE = 0.18725; // mV per bit. depends on gain of ADS
-  float SENSITIVITY = 400; // mV/A
+  double Viout = 0.245 * 1000; // mV Zero current Output Voltage
+  double SCALE = 0.18725; // mV per bit. depends on gain of ADS
+  double SENSITIVITY = 400.0; // mV/A
 
   ads1.setGain(GAIN_TWOTHIRDS);
-  long amps1 = ads1.readADC_SingleEnded(0);
-  long amps2 = ads1.readADC_SingleEnded(1);
-  long amps3 = ads1.readADC_SingleEnded(2);
-  long amps4 = ads1.readADC_SingleEnded(3);
+  double amps1 = ads1.readADC_SingleEnded(0);
+  double amps2 = ads1.readADC_SingleEnded(1);
+  double amps3 = ads1.readADC_SingleEnded(2);
+  double amps4 = ads1.readADC_SingleEnded(3);
 
   ads2.setGain(GAIN_TWOTHIRDS);
-  long amps5 = ads2.readADC_SingleEnded(0);
-  long amps6 = ads2.readADC_SingleEnded(1);
-  long scp1 = ads2.readADC_SingleEnded(2);
+  double amps5 = ads2.readADC_SingleEnded(0);
+  double amps6 = ads2.readADC_SingleEnded(1);
+  double scp1 = ads2.readADC_SingleEnded(2);
   data.scp2 = ads2.readADC_SingleEnded(3);
 
   ads3.setGain(GAIN_TWOTHIRDS);
@@ -1002,10 +1090,10 @@ void getSensorData(FsrScpData_t& data) { // Read the data from the ADS 1115.
   data.amps1 = amps3;
   data.amps2 = amps4;
 
-  data.amps3 = (amps3 * SCALE - Viout) / SENSITIVITY;
-  data.amps4 = (amps4 * SCALE - Viout) / SENSITIVITY;
-  data.amps5 = (amps5 * SCALE - Viout) / SENSITIVITY;
-  data.amps6 = (amps6 * SCALE - Viout) / SENSITIVITY;
+  data.amps3 = ((amps3 * SCALE) - Viout) / SENSITIVITY;
+  data.amps4 = ((amps4 * SCALE) - Viout) / SENSITIVITY;
+  data.amps5 = ((amps5 * SCALE) - Viout) / SENSITIVITY;
+  data.amps6 = ((amps6 * SCALE) - Viout) / SENSITIVITY;
 
   //convert Voltage to force
   data.scp1 = Voltage2Force(scp1);
