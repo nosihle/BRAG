@@ -81,7 +81,7 @@ double state_vel[3] = {0.0, 0.0, 0.0};
 double fin_length[3] = {L_1, L_2, L_3};
 
 state_t desired_state;
-state_t theta_d;
+state_t theta_d, theta_curr;
 trq_t tau_comp;
 
 //IMU needs
@@ -306,6 +306,7 @@ void setup(void) {
   double radius = 0.015; //cm
   double Lt = 16.5; //cm
   state_t tendon_len, tendon_vel;
+  state_t tendon_len_curr, tendon_vel_curr;
   double GR = 30.0f; double CPR = 12.0;
   double targetRotsFromDisp_1, targetRotsFromDisp_2, targetMotorRotSpeed_1, targetMotorRotSpeed_2;
   int long goalTicks_1, goalTicks_2, refTicks_1, refTicks_2;
@@ -322,6 +323,8 @@ void setup(void) {
   double e_integral = 0.0; double e_integral_1 = 0.0; double e_integral_m = 0.0;
   double u, u1, U, vel_PD0, vel_PD_1, vel_COM;
 
+  double er_contrac_1, er_contrac_2, er_contracVel_1, er_contracVel_2;
+
   //while (!Serial) {
   //Read sensor readings to get current pos
   getEncCounts(ticks, rots);
@@ -333,9 +336,12 @@ void setup(void) {
   double motor_rots_1prev = motor_pos_1prev / (CPR * GR); //rotations
   double motor_rots_2prev = motor_pos_2prev / (CPR * GR);
 
-  double q1_0 = 0.0; double q2_0 = 0.0;
-  double contra_1 = 0.0; double contra_2 = 0.0;
+  double q1_0 = 0.0; double q1_c0 = 0.0; double q2_0 = 0.0; double q2_c0 = 0.0;
+  double contra_1 = 0.0; double contra_c1 = 0.0; double contra_2 = 0.0; double contra_c2 = 0.0;
   double rotsTravelled_1, rotsTravelled_2;
+  double err_Rots_1, err_Rots_2, err_RotSpeed_1, err_RotSpeed_2;
+  double er_U1, er_U2, er_command_1, er_command_2;
+
 
   double currTime = micros() * 1e-6;
   double endTime = currTime + 10; //run for 10 seconds
@@ -348,13 +354,53 @@ void setup(void) {
     computeTendonLengths (tendon_len, theta_d);
     computeTendonVelocity (tendon_vel, theta_d);
 
+    //Compute current tendonLength and Vel using measured joint angles
+    computeTendonLengths (tendon_len_curr, fingState);
+    computeTendonVelocity (tendon_vel_curr, fingState);
+
     if (currTime < 0.8) { //get initial tendon value.
       q1_0 = tendon_len.pos.x;
       q2_0 = tendon_len.pos.y;
+      q1_c0 = tendon_len_curr.pos.x;
+      q2_c0 = tendon_len_curr.pos.y;
     }
 
     contra_1 = tendon_len.pos.x - q1_0;
     contra_2 = tendon_len.pos.y - q2_0;
+
+    contra_c1 = tendon_len_curr.pos.x - q1_c0;
+    contra_c2 = tendon_len_curr.pos.y - q2_c0;
+
+    //Calculate error in contractions and linear velocities
+    er_contrac_1 = contra_c1 - contra_1;
+    er_contrac_2 = contra_c2 - contra_2;
+    er_contracVel_1 = tendon_vel_curr.vel.x - tendon_vel.vel.x;
+    er_contracVel_2 = tendon_vel_curr.vel.y - tendon_vel.vel.y;
+
+    //use error computation to compute desired pos,vel
+    err_Rots_1 = dispToRots(er_contrac_1, radius, Lt);
+    err_Rots_2 = dispToRots(er_contrac_2, radius, Lt);
+    err_RotSpeed_1 = rotSpeed (er_contracVel_1, Lt, err_Rots_1, radius);
+    err_RotSpeed_2 = rotSpeed (er_contracVel_2, Lt, err_Rots_2, radius);
+
+    er_U1 = KP * err_Rots_1 + KD * err_RotSpeed_1;
+    er_U2 = KP * err_Rots_2 + KD * err_RotSpeed_2;
+
+    // normalize to PWM using tanh
+    er_command_1 = tanh(er_U1) * 255;
+    er_command_2 = tanh(er_U2) * 255;
+
+    if (er_command_1 > 255) { //Check for saturation
+      er_command_1 = 255;
+    } else if (er_command_1 < -1 * 255) {
+      er_command_1 = -1 * 255;
+    }
+
+    if (er_command_2 > 255) { //Check for saturation
+      er_command_2 = 255;
+    } else if (er_command_2 < -1 * 255) {
+      er_command_2 = -1 * 255;
+    }
 
     //convert pos_des to motor rotations
     targetRotsFromDisp_1 = dispToRots(contra_1, radius, Lt); // gives rotations
@@ -561,7 +607,7 @@ void setup(void) {
 
     Serial.print(nowTime_S); Serial.print(",");
     Serial.print(deltaT, 4); Serial.print(","); Serial.print("\t");
-    
+
     Serial.print(targetRotsFromDisp_1); Serial.print(",");
     Serial.print(targetRotsFromDisp_2); Serial.print(",");
     Serial.print(q1_0, 3); Serial.print(",");
@@ -593,11 +639,11 @@ void setup(void) {
     Serial.print(theta_0); Serial.print(",");
     Serial.print(theta_1); Serial.print(",");
     Serial.print(theta_2); Serial.print(",");
-    Serial.print(theta_3); Serial.print(",");
+    Serial.print(theta_3); Serial.print(",");Serial.print("\t");
 
     Serial.print(fingState.pos.x); Serial.print(",");
     Serial.print(fingState.pos.y); Serial.print(",");
-    Serial.print(fingState.pos.z); Serial.print(",");
+    Serial.print(fingState.pos.z); Serial.print(",");Serial.print("\t");
 
     Serial.print(fingState.vel.x); Serial.print(",");
     Serial.print(fingState.vel.y); Serial.print(",");
@@ -605,13 +651,14 @@ void setup(void) {
 
     Serial.print(fingState.acc.x); Serial.print(",");
     Serial.print(fingState.acc.y); Serial.print(",");
-    Serial.print(fingState.acc.z); Serial.print(","); 
+    Serial.print(fingState.acc.z); Serial.print(",");
 
     Serial.print(sensorData.amps1); Serial.print(","); //raw current values
     Serial.print(sensorData.amps2); Serial.print(","); //raw current values
     Serial.print(sensorData.amps3, 5); Serial.print(","); //current values
     Serial.print(sensorData.amps4, 5); Serial.print(","); //current values
-    
+    Serial.print(sensorData.scp1); Serial.print(","); //FSR
+
     Serial.println();
 
     /*
