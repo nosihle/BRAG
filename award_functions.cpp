@@ -227,19 +227,19 @@ float Voltage2Force(int forceBits) {
   */
 
   if (forceBits < 10) { //bits should never be below zero. negative means no reading
-    float out = 0;
+    double out = 0;
     return out;
   } else {
-    float p1, p2, p3, p4, p5, p6, p7, p8, p9;
+    double p1, p2, p3, p4, p5, p6, p7, p8, p9;
     p1 = 0.1395; p2 = -1.878; p3 = 10.52; p4 = -31.58;
     p5 = 54.86; p6 = -55.14; p7 = 29.8; p8 = -5.521;
     p9 = 1.216;
 
     //Convert bits to voltage, V
-    float SCALE = 0.18725 / 1000; // V per bit.
-    float forceVolts = forceBits * SCALE;
+    double SCALE = 0.18725 / 1000.0; // V per bit.
+    double forceVolts = forceBits * SCALE;
 
-    float out = p1 * pow(forceVolts, 8) + p2 * pow(forceVolts, 7) + p3 * pow(forceVolts, 6) +
+    double out = p1 * pow(forceVolts, 8) + p2 * pow(forceVolts, 7) + p3 * pow(forceVolts, 6) +
                 p4 * pow(forceVolts, 5) + p5 * pow(forceVolts, 4) + p6 * pow(forceVolts, 3) +
                 p7 * pow(forceVolts, 2) + p8 * forceVolts + p9;
 
