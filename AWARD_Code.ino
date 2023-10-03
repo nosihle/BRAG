@@ -270,19 +270,6 @@ void setup(void) {
 
   //Computed Controll Implementation
 
-  //initialize control variables
-  polyCoef_t COEFF;
-  float PosInit = 40.0;
-  float PosFinal = 70.0;//cm
-  float VelInit = 0.0;
-  float VelFinal = 0.0;
-  unsigned t_init = millis();
-  float duration = 10; //seconds
-  unsigned t_final = t_init + (duration * 1000);
-  //call function generator of choice, using cubic function for now, to compute coefficients
-  CubicTrajCoeff (COEFF, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
-
-  //repeat this for a set duration
   // initialize position, velocity and acceleration
   float theta_0 = 0.0f; float theta_1 = 0.0f;
   float theta_2 = 0.0f; float theta_3 = 0.0f;
@@ -300,6 +287,49 @@ void setup(void) {
 
   float dDot_angl_1 = 0.0f; float dDot_angl_2 = 0.0f; float dDot_angl_3 = 0.0f;
   float dDot_angl_1_old = 0.0f; float dDot_angl_2_old = 0.0f; float dDot_angl_3_old = 0.0f;
+
+    //Read sensor readings to get current pos
+  getEncCounts(ticks, rots);
+  getSensorData(sensorData);
+
+      // read sensor data
+    readIMUData(lsm6ds33, 1, accel1, gyro1, temp1, BiasIMU1);
+    readIMUData(lsm6ds33, 2, accel2, gyro2, temp2, BiasIMU2);
+    readIMUData(lsm6ds33, 3, accel3, gyro3, temp3, BiasIMU3);
+    readIMUData(lsm6ds33, 6, accel6, gyro6, temp6, BiasIMU6);
+
+    //compute angles using updated sensor info
+    computeFingerAngleCF(accel1, gyro1, anglesNew1, velAcc1, BiasIMU1);
+    computeFingerAngleCF(accel2, gyro2, anglesNew2, velAcc2, BiasIMU2);
+    computeFingerAngleCF(accel3, gyro3, anglesNew3, velAcc3, BiasIMU3);
+    computeFingerAngleCF(accel6, gyro6, anglesNew6, velAcc6, BiasIMU6);
+
+    //get needed angles and compute derivatives
+    theta_0 = anglesNew1.aX + 180;
+    theta_1 = anglesNew2.aX + 180;
+    theta_2 = anglesNew3.aX + 180;
+    theta_3 = anglesNew6.aX + 180;
+
+    //compute joint angles
+    fingState.pos.x = theta_1 - theta_0;
+    fingState.pos.y = theta_2 - theta_1;
+    fingState.pos.z = theta_3 - theta_2;
+
+
+  //initialize control variables
+  polyCoef_t COEFF;
+  float thetaTotal = fingState.pos.x + fingState.pos.y + fingState.pos.z;
+  float PosInit = thetaTotal; //40.0. Instead of hardcoding initial pos, make it based on senser reading. 
+  float PosFinal = PosInit + 30;// 70 degress. Instead specify the change of angle
+  float VelInit = 0.0;
+  float VelFinal = 0.0;
+  unsigned t_init = millis();
+  float duration = 10; //seconds
+  unsigned t_final = t_init + (duration * 1000);
+  //call function generator of choice, using cubic function for now, to compute coefficients
+  CubicTrajCoeff (COEFF, t_init, t_final, PosInit, PosFinal, VelInit, VelFinal);
+
+  //repeat this for a set duration
 
   unsigned long nowTime;
   double nowTime_S, deltaT, timeChange;
@@ -326,9 +356,6 @@ void setup(void) {
   double er_contrac_1, er_contrac_2, er_contracVel_1, er_contracVel_2;
 
   //while (!Serial) {
-  //Read sensor readings to get current pos
-  getEncCounts(ticks, rots);
-  getSensorData(sensorData);
 
   //should always be zero since it is incremental encoder.
   int motor_pos_1prev = ticks.m3;
@@ -358,7 +385,7 @@ void setup(void) {
     computeTendonLengths (tendon_len_curr, fingState);
     computeTendonVelocity (tendon_vel_curr, fingState);
 
-    if (currTime < 0.8) { //get initial tendon value.
+    if (currTime < 1.25) { //get initial tendon value.
       q1_0 = tendon_len.pos.x;
       q2_0 = tendon_len.pos.y;
       q1_c0 = tendon_len_curr.pos.x;
@@ -497,7 +524,6 @@ void setup(void) {
     vel_4_old = velAcc6.pVel;
 
     //
-
     err_m1 = currentMotorRots_1 - targetRotsFromDisp_1;
     err_m2 = currentMotorRots_2 - targetRotsFromDisp_2;
     doterr_m1 = currentMotorRotSpeed_1 - targetMotorRotSpeed_1;
@@ -560,7 +586,17 @@ void setup(void) {
       vel_COM = -1 * 255;
     }
 
-    //Drive motors in opposite directions
+    //Implementation using IMU data for feedback. Need to drive motors in opposite directions
+
+      if (sgn(er_command_2) > 0) {
+      FWD_MotorsV2(m_FNT3, fabs(er_command_2));
+      RVS_MotorsV2(m_FNT4, fabs(er_command_2));
+      }
+      else {
+      RVS_MotorsV2(m_FNT3, fabs(er_command_2));
+      FWD_MotorsV2(m_FNT4, fabs(er_command_2));
+      }
+    
     /*
       if (sgn(vel_PD) > 0) {
       RVS_Motors(m_FNT3, fabs(vel_PD));
@@ -581,7 +617,8 @@ void setup(void) {
           RVS_Motors(m_FNT4, fabs(vel_COM));
         } */
 
-
+//Implementation for independent motor control, currently works. Gains need to be tuned a bit
+/*
     if (sgn(vel_PD0) > 0) {
       FWD_MotorsV2(m_FNT4, fabs(vel_PD0));
     }
@@ -595,26 +632,38 @@ void setup(void) {
     else {
       RVS_MotorsV2(m_FNT3, fabs(vel_PD_1));
     }
-
-    //  if (vel_PD < 50) { //minimum PWM to overcome friction
-    //  vel_PD  = 50;
-    // } else if (vel_PD > -1 * 50) {
-    //  vel_PD = -1 * 50;
-    //}
-
+*/
     //Update states
     currTime = nowTime * 1e-6;
 
     Serial.print(nowTime_S); Serial.print(",");
     Serial.print(deltaT, 4); Serial.print(","); Serial.print("\t");
-
+/*
     Serial.print(targetRotsFromDisp_1); Serial.print(",");
     Serial.print(targetRotsFromDisp_2); Serial.print(",");
+    */
+    
     Serial.print(q1_0, 3); Serial.print(",");
     Serial.print(q2_0, 3); Serial.print(",");
     Serial.print(contra_1, 4); Serial.print(",");
     Serial.print(contra_2, 4); Serial.print(","); Serial.print("\t");
 
+    Serial.print(q1_c0, 3); Serial.print(",");
+    Serial.print(q2_c0, 3); Serial.print(",");
+    Serial.print(contra_c1, 4); Serial.print(",");
+    Serial.print(contra_c2, 4); Serial.print(","); Serial.print("\t");
+
+    Serial.print(tendon_vel_curr.vel.x, 3); Serial.print(",");
+    Serial.print(tendon_vel_curr.vel.y, 3); Serial.print(",");
+    Serial.print(tendon_vel.vel.x, 4); Serial.print(",");
+    Serial.print(tendon_vel.vel.y, 4); Serial.print(","); Serial.print("\t");
+/*
+    Serial.print(er_contrac_1, 3); Serial.print(",");
+    Serial.print(er_contrac_2, 3); Serial.print(",");
+    Serial.print(er_contracVel_1, 4); Serial.print(",");
+    Serial.print(er_contracVel_2, 4); Serial.print(","); Serial.print("\t");
+*/
+/*
     Serial.print(motor_rots_1prev); Serial.print(",");
     Serial.print(currentMotorRots_1); Serial.print(",");
     Serial.print(motor_rots_2prev); Serial.print(",");
@@ -628,18 +677,24 @@ void setup(void) {
     Serial.print(currentMotorRotSpeed_2); Serial.print(",");
     Serial.print(targetMotorRotSpeed_2); Serial.print(",");
     Serial.print(doterr_m2); Serial.print(","); Serial.print("\t");
-
+    
     Serial.print(u, 3); Serial.print(",");
     Serial.print(vel_PD0, 3); Serial.print(",");
     Serial.print(u1, 3); Serial.print(",");
-    Serial.print(vel_PD_1, 3); Serial.print(",");
-    Serial.print(U, 3); Serial.print(",");
-    Serial.print(vel_COM, 3); Serial.print(","); Serial.print("\t");
+    Serial.print(vel_PD_1, 3); Serial.print(",");Serial.print("\t");
+*/
 
+    Serial.print(er_U1, 3); Serial.print(",");
+    Serial.print(er_command_1, 3); Serial.print(",");
+    Serial.print(er_U2, 3); Serial.print(",");
+    Serial.print(er_command_2, 3); Serial.print(","); Serial.print("\t");
+    
+/*
     Serial.print(theta_0); Serial.print(",");
     Serial.print(theta_1); Serial.print(",");
     Serial.print(theta_2); Serial.print(",");
     Serial.print(theta_3); Serial.print(",");Serial.print("\t");
+    */
 
     Serial.print(fingState.pos.x); Serial.print(",");
     Serial.print(fingState.pos.y); Serial.print(",");
@@ -647,17 +702,17 @@ void setup(void) {
 
     Serial.print(fingState.vel.x); Serial.print(",");
     Serial.print(fingState.vel.y); Serial.print(",");
-    Serial.print(fingState.vel.z); Serial.print(",");
-
+    Serial.print(fingState.vel.z); Serial.print(",");Serial.print("\t");
+/*
     Serial.print(fingState.acc.x); Serial.print(",");
     Serial.print(fingState.acc.y); Serial.print(",");
     Serial.print(fingState.acc.z); Serial.print(",");
-
+*/
     Serial.print(sensorData.amps1); Serial.print(","); //raw current values
     Serial.print(sensorData.amps2); Serial.print(","); //raw current values
     Serial.print(sensorData.amps3, 5); Serial.print(","); //current values
     Serial.print(sensorData.amps4, 5); Serial.print(","); //current values
-    Serial.print(sensorData.scp1); Serial.print(","); //FSR
+    Serial.print(sensorData.scp1, 5); Serial.print(","); //FSR
 
     Serial.println();
 
@@ -758,8 +813,9 @@ void setup(void) {
 //}
 
 void loop(void) {
-  butControl(pinNum); //CW for top motor (undo from 1 pos)
-  //butControlRVS(pinNum); //CCW for top motor
+  //butControl(pinNum); //CW for top motor (undo from 1 pos)
+  butControlRVS(pinNum); //CCW for top motor
+  //Serial.print("butControlRVS"); Serial.println();
   t_now = millis();
   if (t_now - millisPrevious >= millisPerReading) {
 
@@ -1722,8 +1778,8 @@ void butControl(int pinNum) {
     STOP_Motors(M_B);
   }
   else { // pin is low due to pressed button
-    RVS_Motors(M_two, 150.0); //using motors in J3, J4
-    RVS_Motors(M_one, 150.0); //
+    RVS_MotorsV2(M_two, 150.0); //using motors in J3, J4
+    RVS_MotorsV2(M_one, 150.0); //
   }
 }
 
@@ -1741,8 +1797,8 @@ void butControlRVS(int pinNum) {
       FWD_Motors(M_one, 150.0); // opposite direction
     */
 
-    FWD_Motors(M_two, 150.0); //using motors in J3, J4
-    FWD_Motors(M_one, 150.0); // opposite direction
+    FWD_MotorsV2(M_two, 150.0); //using motors in J3, J4
+    FWD_MotorsV2(M_one, 150.0); // opposite direction
   }
 }
 
