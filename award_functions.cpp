@@ -209,8 +209,12 @@ float rotSpeed (float linSpeed, float Lt, float n, float radius) {
      radius are the same units (cm or m) and linSpeed is also in corresponding units
      (cm/s or m/s)
   */
+  if (n == 0.00) {
+    return 0.00;
+  } else {
   float theta = 2 * PI * n; // radians
   return linSpeed * sqrt(pow(Lt, 2) + pow(theta * radius, 2)) / (theta * pow(radius, 2)); //radians/second
+  }
 }
 
 int sgn(float num) {
