@@ -377,7 +377,7 @@ void setup(void) {
     //theta_d (degrees), dottheta_d has been computed/updated.
     computeDesiredStates (theta_d, desired_state, COEFF, currTime); // currTime must be in seconds
 
-    //Compute the q from theta_d, dotq from theta_d, dottheta
+    //Compute q,q_dot from theta_d, theta_d_dot
     computeTendonLengths (tendon_len, theta_d);
     computeTendonVelocity (tendon_vel, theta_d);
 
@@ -385,7 +385,7 @@ void setup(void) {
     computeTendonLengths (tendon_len_curr, fingState);
     computeTendonVelocity (tendon_vel_curr, fingState);
 
-    if (currTime < 1.25) { //get initial tendon value.
+    if (currTime < 1.17) { //get initial tendon value.
       q1_0 = tendon_len.pos.x;
       q2_0 = tendon_len.pos.y;
       q1_c0 = tendon_len_curr.pos.x;
